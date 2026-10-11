@@ -93,11 +93,56 @@ public sealed class TaskSchedulerContractTests
             Assert.True(disabledStatus.IsOwned);
             Assert.False(disabledStatus.IsEnabled);
 
+            var changedWhileDisabled = updated with { Enabled = false, WakeToRun = true };
+            var disabledUpdate = await gateway.InstallOrUpdateAsync(changedWhileDisabled, CancellationToken.None);
+            Assert.True(disabledUpdate.Succeeded, Describe(disabledUpdate));
+            var preservedDisabledStatus = await gateway.ReadStatusAsync(taskPath, runnerPath, updated.ConfiguredTimeZoneId, CancellationToken.None);
+            Assert.Equal(SchedulerState.OWNED_DISABLED, preservedDisabledStatus.State);
+            Assert.False(preservedDisabledStatus.IsEnabled);
+            Assert.True(preservedDisabledStatus.Readback!.WakeToRun);
+
             var removed = await gateway.RemoveAsync(taskPath, CancellationToken.None);
             Assert.True(removed.Succeeded, removed.DiagnosticCategory);
             var removedStatus = await gateway.ReadStatusAsync(taskPath, runnerPath, updated.ConfiguredTimeZoneId, CancellationToken.None);
             Assert.Equal(SchedulerState.NOT_INSTALLED, removedStatus.State);
             Assert.False(removedStatus.Exists);
+        }
+        finally
+        {
+            await gateway.RemoveAsync(taskPath, CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task MovedRunnerPath_ShowsNeedsRepair_AndRepairUpdatesOwnedAction()
+    {
+        var taskPath = CreateUniqueTaskPath();
+        var currentRunnerPath = FindRunnerPath();
+        var oldRunnerPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
+        Assert.True(File.Exists(oldRunnerPath), $"The old action fixture was not found at {oldRunnerPath}.");
+        var gateway = new WindowsTaskSchedulerGateway();
+        var definition = CreateDefinition(taskPath, oldRunnerPath, wakeToRun: false, [new(7, 0), new(12, 1), new(17, 1), new(22, 1)]);
+        var evaluator = new SchedulerHealthEvaluator();
+
+        try
+        {
+            var installedAtOldPath = await gateway.InstallOrUpdateAsync(definition, CancellationToken.None);
+            Assert.True(installedAtOldPath.Succeeded, Describe(installedAtOldPath));
+
+            var staleStatus = await gateway.ReadStatusAsync(taskPath, currentRunnerPath, definition.ConfiguredTimeZoneId, CancellationToken.None);
+            var health = evaluator.Evaluate(staleStatus, currentRunnerPath, definition.ConfiguredTimeZoneId, TimeZoneInfo.Local.Id);
+            Assert.Equal(SchedulerState.NEEDS_REPAIR, health.State);
+            Assert.Equal(Path.GetFullPath(oldRunnerPath), health.RegisteredRunnerPath);
+            Assert.Equal(Path.GetFullPath(currentRunnerPath), health.ExpectedRunnerPath);
+
+            var repairedDefinition = definition with { RunnerPath = currentRunnerPath };
+            var repaired = await gateway.InstallOrUpdateAsync(repairedDefinition, CancellationToken.None);
+            Assert.True(repaired.Succeeded, Describe(repaired));
+
+            var verified = await gateway.ReadStatusAsync(taskPath, currentRunnerPath, definition.ConfiguredTimeZoneId, CancellationToken.None);
+            var verifiedHealth = evaluator.Evaluate(verified, currentRunnerPath, definition.ConfiguredTimeZoneId, TimeZoneInfo.Local.Id);
+            Assert.Equal(SchedulerState.ON, verifiedHealth.State);
+            Assert.Equal(Path.GetFullPath(currentRunnerPath), verifiedHealth.RegisteredRunnerPath);
         }
         finally
         {

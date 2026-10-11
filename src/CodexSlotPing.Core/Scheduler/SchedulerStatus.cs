@@ -32,4 +32,13 @@ public sealed record SchedulerStatus(
     string? Description,
     SchedulerTaskReadback? Readback,
     IReadOnlyList<string> ContractMismatches,
-    string? DiagnosticCategory);
+    string? DiagnosticCategory)
+{
+    public string? RegisteredRunnerPath => Readback?.ActionPath;
+
+    public string? ExpectedRunnerPath { get; init; }
+
+    public string? ConfiguredTimeZoneId { get; init; }
+
+    public string? CurrentWindowsTimeZoneId { get; init; }
+}

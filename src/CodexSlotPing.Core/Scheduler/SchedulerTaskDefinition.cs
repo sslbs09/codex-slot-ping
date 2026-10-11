@@ -6,4 +6,5 @@ public sealed record SchedulerTaskDefinition(
     string ConfiguredTimeZoneId,
     IReadOnlyList<TimeOnly> SlotTimes,
     bool WakeToRun,
-    DateOnly? StartBoundaryDate = null);
+    DateOnly? StartBoundaryDate = null,
+    bool Enabled = true);

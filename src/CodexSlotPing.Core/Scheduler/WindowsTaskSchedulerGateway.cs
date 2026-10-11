@@ -9,8 +9,8 @@ namespace CodexSlotPing.Core.Scheduler;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
 {
-    public const string ProductionTaskPath = "\\Codex Slot Ping";
-    public const string OwnerMarker = "Codex Slot Ping; Owner=CodexSlotPing; Schema=1";
+    public const string ProductionTaskPath = SchedulerTaskContract.ProductionTaskPath;
+    public const string OwnerMarker = SchedulerTaskContract.OwnerMarker;
 
     private const int TaskTriggerDaily = 2;
     private const int TaskActionExec = 0;
@@ -249,7 +249,7 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
                 TaskLogonInteractiveToken,
                 null);
             dynamic registeredObject = registeredTask;
-            registeredObject.Enabled = true;
+            registeredObject.Enabled = definition.Enabled;
 
             var status = ReadStatusOnSta(definition.TaskPath, taskName, runnerPath, definition.ConfiguredTimeZoneId);
             if (MatchesDefinition(status, definition))
@@ -386,7 +386,7 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
 
             settings = definitionObject.Settings;
             dynamic settingsObject = settings;
-            settingsObject.Enabled = true;
+            settingsObject.Enabled = source.Enabled;
             settingsObject.StartWhenAvailable = false;
             settingsObject.MultipleInstances = TaskMultipleInstancesIgnoreNew;
             settingsObject.ExecutionTimeLimit = "PT2M";
@@ -558,7 +558,9 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
 
     private static bool MatchesDefinition(SchedulerStatus status, SchedulerTaskDefinition definition)
     {
-        if (status.State != SchedulerState.OWNED_ENABLED || status.Readback is null || status.ContractMismatches.Count > 0)
+        var expectedState = definition.Enabled ? SchedulerState.OWNED_ENABLED : SchedulerState.OWNED_DISABLED;
+        if (status.State != expectedState || status.IsEnabled != definition.Enabled ||
+            status.Readback is null || status.ContractMismatches.Count > 0)
         {
             return false;
         }
