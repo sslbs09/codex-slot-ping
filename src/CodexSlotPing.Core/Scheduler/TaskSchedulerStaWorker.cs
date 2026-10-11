@@ -5,6 +5,8 @@ namespace CodexSlotPing.Core.Scheduler;
 [SupportedOSPlatform("windows")]
 public sealed class TaskSchedulerStaWorker
 {
+    private static readonly SemaphoreSlim OperationGate = new(1, 1);
+
     public Task<T> RunAsync<T>(Func<T> operation, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(operation);
@@ -13,8 +15,12 @@ public sealed class TaskSchedulerStaWorker
         var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
+            var gateAcquired = false;
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                OperationGate.Wait(cancellationToken);
+                gateAcquired = true;
                 cancellationToken.ThrowIfCancellationRequested();
                 completion.TrySetResult(operation());
             }
@@ -25,6 +31,13 @@ public sealed class TaskSchedulerStaWorker
             catch (Exception exception)
             {
                 completion.TrySetException(exception);
+            }
+            finally
+            {
+                if (gateAcquired)
+                {
+                    OperationGate.Release();
+                }
             }
         })
         {

@@ -11,6 +11,7 @@ public sealed class StructuredLogWriter : IStructuredLogWriter
     {
         "agent-message-missing",
         "cancelled-after-process-start",
+        "cli-environment-not-ready",
         "completion-unconfirmed",
         "malformed-jsonl",
         "multiple-terminal-events",

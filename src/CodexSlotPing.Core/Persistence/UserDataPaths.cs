@@ -18,7 +18,11 @@ public sealed record UserDataPaths
 
     public static UserDataPaths ForCurrentUser()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (string.IsNullOrWhiteSpace(localAppData) || !Path.IsPathRooted(localAppData))
+        {
+            localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        }
         ArgumentException.ThrowIfNullOrWhiteSpace(localAppData);
         return new UserDataPaths(Path.Combine(localAppData, "CodexSlotPing"));
     }

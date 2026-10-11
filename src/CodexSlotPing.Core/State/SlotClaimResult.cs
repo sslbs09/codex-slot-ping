@@ -1,4 +1,5 @@
 using CodexSlotPing.Core.Slots;
+using CodexSlotPing.Core.Configuration;
 
 namespace CodexSlotPing.Core.State;
 
@@ -29,4 +30,6 @@ public sealed record SlotClaimResult(
     SlotClaimBlockReason? BlockReason)
 {
     public bool IsClaimed => Kind == SlotClaimKind.Claimed;
+
+    public AppConfig? ConfigSnapshot { get; init; }
 }

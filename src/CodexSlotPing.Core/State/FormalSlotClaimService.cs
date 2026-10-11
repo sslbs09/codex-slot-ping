@@ -184,7 +184,10 @@ public sealed class FormalSlotClaimService
                 return Blocked(SlotClaimBlockReason.StatePersistenceFailed);
             }
 
-            return new SlotClaimResult(SlotClaimKind.Claimed, slotId, FormalSlotStatus.CLAIMED, null);
+            return new SlotClaimResult(SlotClaimKind.Claimed, slotId, FormalSlotStatus.CLAIMED, null)
+            {
+                ConfigSnapshot = config
+            };
         }
     }
 

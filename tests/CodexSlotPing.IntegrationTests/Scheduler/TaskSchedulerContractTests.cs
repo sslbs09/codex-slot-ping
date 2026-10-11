@@ -10,6 +10,41 @@ public sealed class TaskSchedulerContractTests
     private readonly TaskSchedulerStaWorker _staWorker = new();
 
     [Fact]
+    public async Task ConcurrentRunnerSchedulerRequests_AreSerializedAcrossStaWorkers()
+    {
+        var firstWorker = new TaskSchedulerStaWorker();
+        var secondWorker = new TaskSchedulerStaWorker();
+        using var firstEntered = new ManualResetEventSlim(false);
+        using var releaseFirst = new ManualResetEventSlim(false);
+        var secondStarted = 0;
+
+        var first = firstWorker.RunAsync(() =>
+        {
+            firstEntered.Set();
+            if (!releaseFirst.Wait(TimeSpan.FromSeconds(5)))
+            {
+                throw new TimeoutException("The test did not release the first STA operation.");
+            }
+            return true;
+        }, CancellationToken.None);
+
+        Assert.True(await Task.Run(() => firstEntered.Wait(TimeSpan.FromSeconds(5))));
+        var second = secondWorker.RunAsync(() =>
+        {
+            Interlocked.Exchange(ref secondStarted, 1);
+            return true;
+        }, CancellationToken.None);
+
+        await Task.Delay(150);
+        var overlapped = Volatile.Read(ref secondStarted);
+        releaseFirst.Set();
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(0, overlapped);
+        Assert.Equal(1, secondStarted);
+    }
+
+    [Fact]
     public async Task InstallReadsBackEveryFrozenTaskContractField()
     {
         var taskPath = CreateUniqueTaskPath();
