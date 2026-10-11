@@ -100,7 +100,7 @@ public sealed class AppControllerTests
 
         var path = RunnerPathResolver.Resolve(appBase);
 
-        Assert.Equal(Path.GetFullPath(Path.Combine(appBase, "CodexSlotPing.Runner.exe")), path);
+        Assert.Equal(Path.GetFullPath(Path.Combine(appBase, "Runner", "CodexSlotPing.Runner.exe")), path);
     }
 
     private static SchedulerStatus Status(

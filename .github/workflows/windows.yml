@@ -1,0 +1,156 @@
+name: Windows portable build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - v0.1.0
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test solution
+        run: dotnet test CodexSlotPing.sln -c Release
+
+      - name: Publish self-contained App
+        run: >-
+          dotnet publish src/CodexSlotPing.App/CodexSlotPing.App.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=false
+          -o artifacts/stage
+
+      - name: Publish self-contained Runner
+        run: >-
+          dotnet publish src/CodexSlotPing.Runner/CodexSlotPing.Runner.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=false
+          -o artifacts/stage/Runner
+
+      - name: Verify portable layout and create ZIP/checksum
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:GITHUB_WORKSPACE 'artifacts/stage'
+          $required = @(
+            'CodexSlotPing.App.exe',
+            'Runner/CodexSlotPing.Runner.exe',
+            'coreclr.dll',
+            'hostfxr.dll',
+            'hostpolicy.dll',
+            'Runner/coreclr.dll',
+            'Runner/hostfxr.dll',
+            'Runner/hostpolicy.dll'
+          )
+          foreach ($relative in $required) {
+            $path = Join-Path $stage $relative
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Portable package is missing required file: $relative"
+            }
+          }
+
+          $executables = @(Get-ChildItem -LiteralPath $stage -Recurse -File -Filter '*.exe' | ForEach-Object {
+            [IO.Path]::GetRelativePath($stage, $_.FullName).Replace('\', '/')
+          } | Sort-Object)
+          $expectedExecutables = @('CodexSlotPing.App.exe', 'Runner/CodexSlotPing.Runner.exe') | Sort-Object
+          $missingExecutables = @($expectedExecutables | Where-Object { $_ -notin $executables })
+          if ($missingExecutables.Count -gt 0) {
+            throw "Portable package is missing product executables: $($missingExecutables -join ', ')"
+          }
+          $unexpectedExecutables = @($executables | Where-Object {
+            $_ -notin $expectedExecutables -and [IO.Path]::GetFileName($_) -ne 'createdump.exe'
+          })
+          if ($unexpectedExecutables.Count -gt 0) {
+            throw "Unexpected executables in portable package: $($unexpectedExecutables -join ', ')"
+          }
+
+          $scriptFiles = @(Get-ChildItem -LiteralPath $stage -Recurse -File | Where-Object {
+            $_.Extension -in @('.ps1', '.psm1', '.cmd', '.bat')
+          })
+          if ($scriptFiles.Count -gt 0) {
+            throw 'Portable package must not require a PowerShell or shell wrapper.'
+          }
+
+          $artifactDirectory = Join-Path $env:GITHUB_WORKSPACE 'artifacts'
+          $zipName = 'CodexSlotPing-v0.1.0-win-x64.zip'
+          $zipPath = Join-Path $artifactDirectory $zipName
+          $checksumPath = "$zipPath.sha256"
+          if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+          if (Test-Path -LiteralPath $checksumPath) { Remove-Item -LiteralPath $checksumPath -Force }
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -CompressionLevel Optimal
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
+            foreach ($requiredEntry in @('CodexSlotPing.App.exe', 'Runner/CodexSlotPing.Runner.exe')) {
+              if ($entries -notcontains $requiredEntry) {
+                throw "ZIP is missing required executable: $requiredEntry"
+              }
+            }
+          }
+          finally {
+            $archive.Dispose()
+          }
+
+          $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText($checksumPath, "$hash  $zipName`n", [Text.UTF8Encoding]::new($false))
+          $verifiedHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if (-not (Get-Content -LiteralPath $checksumPath -Raw).StartsWith($verifiedHash)) {
+            throw 'The SHA-256 file does not match the ZIP.'
+          }
+
+      - name: Upload ZIP and checksum
+        uses: actions/upload-artifact@v7
+        with:
+          name: CodexSlotPing-v0.1.0-win-x64
+          path: |
+            artifacts/CodexSlotPing-v0.1.0-win-x64.zip
+            artifacts/CodexSlotPing-v0.1.0-win-x64.zip.sha256
+          if-no-files-found: error
+
+  release:
+    if: github.ref == 'refs/tags/v0.1.0'
+    needs: windows
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified package
+        uses: actions/download-artifact@v8
+        with:
+          name: CodexSlotPing-v0.1.0-win-x64
+          path: artifacts
+
+      - name: Attach assets to the v0.1.0 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = 'v0.1.0'
+          $zip = 'artifacts/CodexSlotPing-v0.1.0-win-x64.zip'
+          $checksum = "$zip.sha256"
+          gh release view $tag --json tagName *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip $checksum --clobber
+          }
+          else {
+            gh release create $tag $zip $checksum --verify-tag `
+              --title 'Codex Slot Ping v0.1.0' `
+              --notes 'Self-contained Windows x64 portable ZIP. Fixed four-slot scheduling is an engine baseline; Scheduling Semantics v2 remains required before public release.'
+          }

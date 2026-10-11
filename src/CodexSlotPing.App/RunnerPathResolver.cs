@@ -9,6 +9,6 @@ public static class RunnerPathResolver
     public static string Resolve(string appBaseDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(appBaseDirectory);
-        return Path.GetFullPath(Path.Combine(appBaseDirectory, RunnerFileName));
+        return Path.GetFullPath(Path.Combine(appBaseDirectory, "Runner", RunnerFileName));
     }
 }
