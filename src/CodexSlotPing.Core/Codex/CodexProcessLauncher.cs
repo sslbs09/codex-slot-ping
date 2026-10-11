@@ -5,7 +5,7 @@ namespace CodexSlotPing.Core.Codex;
 
 public sealed class CodexProcessLauncher : ICodexProcessLauncher
 {
-    private static readonly TimeSpan FinalDrainTimeout = TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan MaximumOutputDrainTime = TimeSpan.FromSeconds(5);
     private readonly CodexInvocationBuilder _invocationBuilder;
     private readonly CodexOutputClassifier _outputClassifier;
     private readonly RawLogStore? _rawLogStore;
@@ -32,9 +32,26 @@ public sealed class CodexProcessLauncher : ICodexProcessLauncher
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
+        if (_rawLogStore is not null)
+        {
+            try
+            {
+                await _rawLogStore.PruneExpiredAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return PrelaunchFailed("raw-log-cleanup-failed");
+            }
+        }
+
         if (request.CaptureRawLogs && _rawLogStore is null)
         {
             return PrelaunchFailed("raw-log-store-unavailable");
+        }
+
+        if (request.Timeout is { } requestedTimeout && requestedTimeout <= TimeSpan.Zero)
+        {
+            return PrelaunchFailed("invalid-invocation-request");
         }
 
         ProcessStartInfo startInfo;
@@ -65,7 +82,10 @@ public sealed class CodexProcessLauncher : ICodexProcessLauncher
         var standardErrorTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
         var standardInputTask = WritePromptAndCloseAsync(process.StandardInput, request.Prompt, cancellationToken);
 
-        using var timeout = new CancellationTokenSource(_timeout);
+        var timeoutDuration = request.Timeout is { } requestTimeout && requestTimeout < _timeout
+            ? requestTimeout
+            : _timeout;
+        using var timeout = new CancellationTokenSource(timeoutDuration);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         var timedOut = false;
         var cancelledAfterStart = false;
@@ -91,8 +111,11 @@ public sealed class CodexProcessLauncher : ICodexProcessLauncher
             await ObserveInputTaskAsync(standardInputTask).ConfigureAwait(false);
         }
 
-        var stdout = await DrainOutputAsync(standardOutputTask).ConfigureAwait(false);
-        var stderr = await DrainOutputAsync(standardErrorTask).ConfigureAwait(false);
+        var output = await Task.WhenAll(
+            DrainOutputAsync(standardOutputTask),
+            DrainOutputAsync(standardErrorTask)).ConfigureAwait(false);
+        var stdout = output[0];
+        var stderr = output[1];
         stopwatch.Stop();
 
         var result = _outputClassifier.Classify(stdout, stderr, process.ExitCode, timedOut, processStarted: true);
@@ -158,7 +181,7 @@ public sealed class CodexProcessLauncher : ICodexProcessLauncher
     {
         try
         {
-            return await outputTask.WaitAsync(FinalDrainTimeout).ConfigureAwait(false);
+            return await outputTask.WaitAsync(MaximumOutputDrainTime).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {

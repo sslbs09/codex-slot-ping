@@ -64,6 +64,27 @@ public sealed class AppControllerTests
     }
 
     [Fact]
+    public async Task RefreshAsync_ReportsOwnedTaskTriggerTimeDrift()
+    {
+        var config = AppConfigDefaults.Create();
+        var initial = Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath);
+        var changedTimes = new[]
+        {
+            new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T07:00:00"),
+            new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T12:02:00"),
+            new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T17:01:00"),
+            new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T22:01:00")
+        };
+        var status = initial with { Readback = initial.Readback! with { Triggers = changedTimes } };
+        var fixture = new Fixture(config, status);
+
+        var state = await fixture.Controller.RefreshAsync(CancellationToken.None);
+
+        Assert.Equal(SchedulerState.NEEDS_REPAIR, state.Scheduler.State);
+        Assert.Contains("trigger-times-mismatch", state.Scheduler.ContractMismatches);
+    }
+
+    [Fact]
     public async Task RunTestNowAsync_RequiresConfirmation()
     {
         var fixture = new Fixture(AppConfigDefaults.Create(),

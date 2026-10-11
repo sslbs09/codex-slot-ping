@@ -125,7 +125,8 @@ public sealed class AppController
             _runnerPath,
             config.TimeZone,
             cancellationToken).ConfigureAwait(false);
-        var scheduler = _schedulerHealthEvaluator.Evaluate(rawScheduler, _runnerPath, config.TimeZone, currentTimeZoneId);
+        var scheduler = _schedulerHealthEvaluator.Evaluate(rawScheduler, _runnerPath, config.TimeZone,
+            currentTimeZoneId, config.Slots);
         var nextSlot = _nextSlotCalculator.GetNext(config, persistentState, now, currentTimeZoneId);
         var todaySlots = BuildTodaySlots(config, persistentState, now, currentTimeZoneId);
 
@@ -155,7 +156,8 @@ public sealed class AppController
                 _runnerPath,
                 savedConfig.TimeZone,
                 cancellationToken).ConfigureAwait(false);
-            status = _schedulerHealthEvaluator.Evaluate(rawStatus, _runnerPath, savedConfig.TimeZone, currentTimeZoneId);
+            status = _schedulerHealthEvaluator.Evaluate(rawStatus, _runnerPath, savedConfig.TimeZone,
+                currentTimeZoneId, savedConfig.Slots);
         }
         catch (OperationCanceledException)
         {
@@ -376,7 +378,8 @@ public sealed class AppController
                 cancellationToken).ConfigureAwait(false);
         }
 
-        var health = _schedulerHealthEvaluator.Evaluate(currentStatus, _runnerPath, config.TimeZone, currentTimeZoneId);
+        var health = _schedulerHealthEvaluator.Evaluate(currentStatus, _runnerPath, config.TimeZone,
+            currentTimeZoneId, config.Slots);
         if (!userConfirmed)
         {
             return new TimezoneUpdateResult(TimezoneUpdateState.TIMEZONE_CHANGED, config, health,
@@ -400,7 +403,8 @@ public sealed class AppController
             _runnerPath,
             config.TimeZone,
             cancellationToken).ConfigureAwait(false);
-        return _schedulerHealthEvaluator.Evaluate(raw, _runnerPath, config.TimeZone, currentTimeZoneId);
+        return _schedulerHealthEvaluator.Evaluate(raw, _runnerPath, config.TimeZone,
+            currentTimeZoneId, config.Slots);
     }
 
     private SchedulerTaskDefinition CreateDefinition(AppConfig config, bool enabled)

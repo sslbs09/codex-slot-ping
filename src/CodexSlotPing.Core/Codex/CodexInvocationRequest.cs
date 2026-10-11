@@ -7,4 +7,5 @@ public sealed record CodexInvocationRequest(
     string Prompt,
     string WorkingDirectory,
     string InvocationId,
-    bool CaptureRawLogs = false);
+    bool CaptureRawLogs = false,
+    TimeSpan? Timeout = null);

@@ -122,35 +122,3 @@ jobs:
             artifacts/CodexSlotPing-v0.1.0-win-x64.zip
             artifacts/CodexSlotPing-v0.1.0-win-x64.zip.sha256
           if-no-files-found: error
-
-  release:
-    if: github.ref == 'refs/tags/v0.1.0'
-    needs: windows
-    runs-on: windows-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download verified package
-        uses: actions/download-artifact@v8
-        with:
-          name: CodexSlotPing-v0.1.0-win-x64
-          path: artifacts
-
-      - name: Attach assets to the v0.1.0 release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $tag = 'v0.1.0'
-          $zip = 'artifacts/CodexSlotPing-v0.1.0-win-x64.zip'
-          $checksum = "$zip.sha256"
-          gh release view $tag --json tagName *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $zip $checksum --clobber
-          }
-          else {
-            gh release create $tag $zip $checksum --verify-tag `
-              --title 'Codex Slot Ping v0.1.0' `
-              --notes 'Self-contained Windows x64 portable ZIP. Fixed four-slot scheduling is an engine baseline; Scheduling Semantics v2 remains required before public release.'
-          }

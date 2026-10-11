@@ -269,6 +269,13 @@ public partial class MainWindow : Window
 
     internal async Task RequestExitAsync()
     {
+        if (_testNowRunning)
+        {
+            WpfMessageBox.Show(AppExitPolicy.TestNowExitMessage, "Codex Slot Ping", MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
         if (_screenState is null)
         {
             await RefreshAsync();
@@ -310,9 +317,16 @@ public partial class MainWindow : Window
             }
         }
 
-        _exitRequested = true;
-        _tray?.Dispose();
-        AppExitPolicy.RequestExit(() => System.Windows.Application.Current.Shutdown());
+        if (!AppExitPolicy.TryRequestExit(_testNowRunning, () =>
+            {
+                _exitRequested = true;
+                _tray?.Dispose();
+                System.Windows.Application.Current.Shutdown();
+            }))
+        {
+            WpfMessageBox.Show(AppExitPolicy.TestNowExitMessage, "Codex Slot Ping", MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)

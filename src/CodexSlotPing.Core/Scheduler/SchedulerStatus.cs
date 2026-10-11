@@ -21,7 +21,8 @@ public sealed record SchedulerTaskReadback(
     int ActionType,
     string? ActionPath,
     string? ActionArguments,
-    string? WorkingDirectory);
+    string? WorkingDirectory,
+    int ActionCount = 1);
 
 public sealed record SchedulerStatus(
     string TaskPath,

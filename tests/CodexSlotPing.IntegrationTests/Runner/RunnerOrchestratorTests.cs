@@ -129,6 +129,31 @@ public sealed class RunnerOrchestratorTests
     }
 
     [Fact]
+    public async Task SchedulerTriggerTimeMismatch_FailsClosedBeforeClaim()
+    {
+        var fixture = CreateFixture(AtLocal(TestDate, new TimeOnly(7, 1)));
+        fixture.Scheduler.Status = fixture.Scheduler.Status with
+        {
+            Readback = fixture.Scheduler.Status.Readback! with
+            {
+                Triggers =
+                [
+                    new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T07:00:00"),
+                    new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T12:02:00"),
+                    new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T17:01:00"),
+                    new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T22:01:00")
+                ]
+            }
+        };
+
+        var exitCode = await fixture.CreateRunner().RunFormalSlotAsync(CancellationToken.None);
+
+        Assert.Equal(RunnerExitCode.NoDispatch, exitCode);
+        Assert.Empty(fixture.StateStore.State.FormalSlots);
+        Assert.Equal(0, fixture.Launcher.CallCount);
+    }
+
+    [Fact]
     public async Task ClockRollback_BlocksClaimAndLaunch()
     {
         var now = AtLocal(TestDate, new TimeOnly(7, 1));

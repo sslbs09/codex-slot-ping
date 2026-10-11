@@ -107,11 +107,25 @@ public sealed class AppLifecycleTests
         var scheduler = new FakeScheduler(OwnedStatus(enabled: true));
         var shutdownCount = 0;
 
-        AppExitPolicy.RequestExit(() => shutdownCount++);
+        var accepted = AppExitPolicy.TryRequestExit(testNowRunning: false, () => shutdownCount++);
 
+        Assert.True(accepted);
         Assert.Equal(1, shutdownCount);
         Assert.Equal(0, scheduler.DisableCount);
         Assert.Equal(0, scheduler.RemoveCount);
+    }
+
+    [Fact]
+    public void ExitPolicy_DefersShutdownWhileTestNowIsRunning()
+    {
+        var shutdownCount = 0;
+
+        var deferred = AppExitPolicy.TryRequestExit(testNowRunning: true, () => shutdownCount++);
+        var acceptedAfterCompletion = AppExitPolicy.TryRequestExit(testNowRunning: false, () => shutdownCount++);
+
+        Assert.False(deferred);
+        Assert.True(acceptedAfterCompletion);
+        Assert.Equal(1, shutdownCount);
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition)

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using CodexSlotPing.Core.Codex;
 using CodexSlotPing.Core.Concurrency;
@@ -64,6 +65,7 @@ public sealed class RunnerOrchestrator
 
     public async Task<RunnerExitCode> RunFormalSlotAsync(CancellationToken cancellationToken)
     {
+        var runTimer = Stopwatch.StartNew();
         AppConfig preflightConfig;
         try
         {
@@ -118,7 +120,8 @@ public sealed class RunnerOrchestrator
                 schedulerStatus,
                 _currentRunnerPath,
                 preflightConfig.TimeZone,
-                currentWindowsTimeZoneId);
+                currentWindowsTimeZoneId,
+                preflightConfig.Slots);
         }
         catch (ArgumentException)
         {
@@ -164,7 +167,10 @@ public sealed class RunnerOrchestrator
             }
             else
             {
-                invocationResult = await InvokeOnceAsync(environment, config, cancellationToken).ConfigureAwait(false);
+                var childTimeout = RunnerExecutionBudget.GetCodexTimeout(runTimer.Elapsed);
+                invocationResult = childTimeout <= TimeSpan.Zero
+                    ? PrelaunchFailed("runner-time-budget-exhausted")
+                    : await InvokeOnceAsync(environment, config, cancellationToken, childTimeout).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -191,7 +197,8 @@ public sealed class RunnerOrchestrator
     private async Task<CodexInvocationResult> InvokeOnceAsync(
         EnvironmentStatus environment,
         AppConfig config,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeSpan childTimeout)
     {
         string? workingDirectory = null;
         try
@@ -204,7 +211,8 @@ public sealed class RunnerOrchestrator
                 config.Prompt,
                 workingDirectory,
                 Guid.NewGuid().ToString("N"),
-                config.CaptureRawLogs);
+                config.CaptureRawLogs,
+                childTimeout);
             try
             {
                 return await _processLauncher.RunAsync(request, cancellationToken).ConfigureAwait(false);

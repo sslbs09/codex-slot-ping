@@ -34,7 +34,7 @@ public sealed class TimezoneUpdateService
         var currentStatus = await _schedulerGateway.ReadStatusAsync(
             taskPath, currentRunnerPath, config.TimeZone, cancellationToken).ConfigureAwait(false);
         var health = _healthEvaluator.Evaluate(
-            currentStatus, currentRunnerPath, config.TimeZone, currentWindowsTimeZoneId);
+            currentStatus, currentRunnerPath, config.TimeZone, currentWindowsTimeZoneId, config.Slots);
         var timezoneChanged = !string.Equals(config.TimeZone, "SYSTEM", StringComparison.OrdinalIgnoreCase) &&
                               !string.Equals(config.TimeZone, currentWindowsTimeZoneId, StringComparison.OrdinalIgnoreCase);
 
@@ -117,7 +117,7 @@ public sealed class TimezoneUpdateService
         var verifiedStatus = await _schedulerGateway.ReadStatusAsync(
             taskPath, currentRunnerPath, updatedConfig.TimeZone, cancellationToken).ConfigureAwait(false);
         var verifiedHealth = _healthEvaluator.Evaluate(
-            verifiedStatus, currentRunnerPath, updatedConfig.TimeZone, currentWindowsTimeZoneId);
+            verifiedStatus, currentRunnerPath, updatedConfig.TimeZone, currentWindowsTimeZoneId, updatedConfig.Slots);
         if (verifiedHealth.State is not SchedulerState.ON and not SchedulerState.OFF)
         {
             var failedStatus = MarkFailed(verifiedHealth, verifiedHealth.DiagnosticCategory ?? "scheduler-readback-failed");

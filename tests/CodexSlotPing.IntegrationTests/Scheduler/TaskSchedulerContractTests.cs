@@ -216,6 +216,33 @@ public sealed class TaskSchedulerContractTests
         }
     }
 
+    [Fact]
+    public async Task OwnedTaskWithExtraAction_IsMarkedDrifted()
+    {
+        var taskPath = CreateUniqueTaskPath();
+        var runnerPath = FindRunnerPath();
+        var gateway = new WindowsTaskSchedulerGateway();
+        var definition = CreateDefinition(taskPath, runnerPath, wakeToRun: false,
+            [new(7, 0), new(12, 1), new(17, 1), new(22, 1)]);
+
+        try
+        {
+            var installed = await gateway.InstallOrUpdateAsync(definition, CancellationToken.None);
+            Assert.True(installed.Succeeded, Describe(installed));
+            await AddExtraActionAsync(taskPath, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"));
+
+            var status = await gateway.ReadStatusAsync(
+                taskPath, runnerPath, definition.ConfiguredTimeZoneId, CancellationToken.None);
+
+            Assert.Equal(SchedulerState.DRIFTED, status.State);
+            Assert.Contains("action-count-mismatch", status.ContractMismatches);
+        }
+        finally
+        {
+            await gateway.RemoveAsync(taskPath, CancellationToken.None);
+        }
+    }
+
     private static SchedulerTaskDefinition CreateDefinition(
         string taskPath,
         string runnerPath,
@@ -308,6 +335,50 @@ public sealed class TaskSchedulerContractTests
             ReleaseComObject(root);
             ReleaseComObject(service);
             return xml;
+        }, CancellationToken.None);
+
+    private async Task AddExtraActionAsync(string taskPath, string additionalExecutable) =>
+        await _staWorker.RunAsync(() =>
+        {
+            object? service = null;
+            object? root = null;
+            object? task = null;
+            object? definition = null;
+            object? actions = null;
+            object? action = null;
+            object? registered = null;
+            try
+            {
+                service = CreateTaskService();
+                dynamic serviceObject = service;
+                root = serviceObject.GetFolder("\\");
+                dynamic rootObject = root;
+                task = rootObject.GetTask(taskPath.TrimStart('\\'));
+                dynamic taskObject = task;
+                definition = taskObject.Definition;
+                dynamic definitionObject = definition;
+                actions = definitionObject.Actions;
+                dynamic actionsObject = actions;
+                action = actionsObject.Create(0);
+                dynamic actionObject = action;
+                actionObject.Path = additionalExecutable;
+                actionObject.Arguments = "/c exit 0";
+                actionObject.WorkingDirectory = Path.GetDirectoryName(additionalExecutable);
+                var userSid = WindowsIdentity.GetCurrent().User!.Value;
+                registered = rootObject.RegisterTaskDefinition(
+                    taskPath.TrimStart('\\'), definitionObject, 6, userSid, null, 3, null);
+                return true;
+            }
+            finally
+            {
+                ReleaseComObject(registered!);
+                ReleaseComObject(action!);
+                ReleaseComObject(actions!);
+                ReleaseComObject(definition!);
+                ReleaseComObject(task!);
+                ReleaseComObject(root!);
+                ReleaseComObject(service!);
+            }
         }, CancellationToken.None);
 
     private async Task DeleteTaskAsync(string taskPath) =>

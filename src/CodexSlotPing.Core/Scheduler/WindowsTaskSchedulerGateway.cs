@@ -462,6 +462,7 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
 
             var triggerReadback = new List<SchedulerTriggerReadback>();
             var triggerCount = (int)triggersObject.Count;
+            var actionCount = (int)actionsObject.Count;
             for (var index = 1; index <= triggerCount; index++)
             {
                 object? trigger = null;
@@ -487,7 +488,7 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
             string? actionPath = null;
             string? actionArguments = null;
             string? workingDirectory = null;
-            if ((int)actionsObject.Count > 0)
+            if (actionCount > 0)
             {
                 action = actionsObject.Item(1);
                 dynamic actionObject = action;
@@ -514,7 +515,8 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
                 actionType,
                 actionPath,
                 actionArguments,
-                workingDirectory);
+                workingDirectory,
+                actionCount);
         }
         finally
         {
@@ -541,6 +543,7 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
         if (!string.Equals(readback.ActionArguments, $"--task-path \"{taskPath}\"", StringComparison.Ordinal)) mismatches.Add("task-path-argument-mismatch");
         if (!PathsEqual(readback.WorkingDirectory, Path.GetDirectoryName(currentRunnerPath)))
             mismatches.Add("working-directory-mismatch");
+        if (readback.ActionCount != 1) mismatches.Add("action-count-mismatch");
         if (readback.Triggers.Count != 4 || readback.Triggers.Any(trigger =>
             !trigger.IsDaily || !trigger.Enabled || trigger.DaysInterval != 1 || !IsLocalBoundary(trigger.StartBoundary)))
             mismatches.Add("trigger-contract-mismatch");
