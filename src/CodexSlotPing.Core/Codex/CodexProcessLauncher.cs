@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using CodexSlotPing.Core.Logging;
 
 namespace CodexSlotPing.Core.Codex;
 
@@ -6,11 +7,19 @@ public sealed class CodexProcessLauncher : ICodexProcessLauncher
 {
     private static readonly TimeSpan FinalDrainTimeout = TimeSpan.FromSeconds(5);
     private readonly CodexInvocationBuilder _invocationBuilder;
+    private readonly CodexOutputClassifier _outputClassifier;
+    private readonly RawLogStore? _rawLogStore;
     private readonly TimeSpan _timeout;
 
-    public CodexProcessLauncher(CodexInvocationBuilder invocationBuilder, TimeSpan? timeout = null)
+    public CodexProcessLauncher(
+        CodexInvocationBuilder invocationBuilder,
+        TimeSpan? timeout = null,
+        CodexOutputClassifier? outputClassifier = null,
+        RawLogStore? rawLogStore = null)
     {
         _invocationBuilder = invocationBuilder ?? throw new ArgumentNullException(nameof(invocationBuilder));
+        _outputClassifier = outputClassifier ?? new CodexOutputClassifier();
+        _rawLogStore = rawLogStore;
         _timeout = timeout ?? TimeSpan.FromSeconds(100);
         if (_timeout <= TimeSpan.Zero)
         {
@@ -22,6 +31,11 @@ public sealed class CodexProcessLauncher : ICodexProcessLauncher
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
+
+        if (request.CaptureRawLogs && _rawLogStore is null)
+        {
+            return PrelaunchFailed("raw-log-store-unavailable");
+        }
 
         ProcessStartInfo startInfo;
         try
@@ -81,20 +95,36 @@ public sealed class CodexProcessLauncher : ICodexProcessLauncher
         var stderr = await DrainOutputAsync(standardErrorTask).ConfigureAwait(false);
         stopwatch.Stop();
 
-        // Task 7 classifies the JSONL stream. Keep output local so no prompt or response text enters the result object.
-        _ = stdout.Length;
-        _ = stderr.Length;
+        var result = _outputClassifier.Classify(stdout, stderr, process.ExitCode, timedOut, processStarted: true);
+        if (cancelledAfterStart)
+        {
+            result = result with
+            {
+                Classification = CodexResultClassification.ATTEMPTED_UNCONFIRMED,
+                DiagnosticCategory = "cancelled-after-process-start"
+            };
+        }
 
-        return new CodexInvocationResult(
-            CodexResultClassification.ATTEMPTED_UNCONFIRMED,
-            true,
-            process.ExitCode,
-            stopwatch.ElapsedMilliseconds,
-            timedOut,
-            null,
-            Array.Empty<string>(),
-            null,
-            cancelledAfterStart ? "cancelled-after-process-start" : timedOut ? "process-timeout" : null);
+        string? rawLogPath = null;
+        var warningCategories = result.WarningCategories.ToList();
+        if (request.CaptureRawLogs)
+        {
+            try
+            {
+                rawLogPath = await _rawLogStore!.StoreAsync(stdout, stderr, optedIn: true, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                warningCategories.Add("raw-log-write-failed");
+            }
+        }
+
+        return result with
+        {
+            ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
+            RawLogPath = rawLogPath,
+            WarningCategories = warningCategories.Distinct(StringComparer.Ordinal).ToArray()
+        };
     }
 
     private static async Task WritePromptAndCloseAsync(StreamWriter standardInput, string prompt, CancellationToken cancellationToken)

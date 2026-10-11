@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"fixture-thread"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"fixture-item","type":"agent_message","text":"Fixture response marker."}}
+{"type":"turn.completed","usage":{"input_tokens":64,"cached_input_tokens":8,"cache_write_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1}}

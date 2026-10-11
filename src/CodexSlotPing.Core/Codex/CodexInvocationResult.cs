@@ -1,6 +1,11 @@
 namespace CodexSlotPing.Core.Codex;
 
-public sealed record CodexTokenUsage(long InputTokens, long? CachedInputTokens, long? OutputTokens, long? ReasoningTokens);
+public sealed record CodexTokenUsage(
+    long? InputTokens,
+    long? CachedInputTokens,
+    long? CacheWriteInputTokens,
+    long? OutputTokens,
+    long? ReasoningTokens);
 
 public sealed record CodexInvocationResult(
     CodexResultClassification Classification,

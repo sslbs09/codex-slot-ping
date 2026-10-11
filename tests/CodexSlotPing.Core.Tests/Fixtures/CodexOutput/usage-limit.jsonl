@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"fixture-thread"}
+{"type":"turn.started"}
+{"type":"error","message":"You have hit your usage limit. Try again later."}
+{"type":"turn.failed","error":{"message":"You have hit your usage limit. Try again later."}}

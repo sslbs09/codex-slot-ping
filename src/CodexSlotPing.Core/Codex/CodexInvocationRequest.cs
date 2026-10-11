@@ -6,4 +6,5 @@ public sealed record CodexInvocationRequest(
     string ReasoningEffort,
     string Prompt,
     string WorkingDirectory,
-    string InvocationId);
+    string InvocationId,
+    bool CaptureRawLogs = false);

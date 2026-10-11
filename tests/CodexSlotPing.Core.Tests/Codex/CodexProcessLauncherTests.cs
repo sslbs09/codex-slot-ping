@@ -17,6 +17,8 @@ public sealed class CodexProcessLauncherTests
         Assert.True(result.ProcessStarted);
         Assert.Equal(0, result.ExitCode);
         Assert.False(result.TimedOut);
+        Assert.Equal(CodexResultClassification.CONFIRMED_SUCCESS, result.Classification);
+        Assert.Contains("stderr-output", result.WarningCategories);
         Assert.DoesNotContain(prompt, result.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("REDACTED_RESPONSE", result.ToString(), StringComparison.Ordinal);
     }

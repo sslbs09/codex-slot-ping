@@ -22,4 +22,8 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Fixtures\CodexOutput\*.jsonl" />
+  </ItemGroup>
+
 </Project>
