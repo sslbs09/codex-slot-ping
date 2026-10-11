@@ -46,7 +46,7 @@ internal static class Program
             {
                 id = "fixture-agent-message",
                 type = "agent_message",
-                text = "REDACTED_RESPONSE"
+                text = "[redacted fixture response]"
             }
         });
         WriteEvent(new

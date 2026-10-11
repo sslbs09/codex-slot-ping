@@ -20,7 +20,7 @@ public sealed class CodexProcessLauncherTests
         Assert.Equal(CodexResultClassification.CONFIRMED_SUCCESS, result.Classification);
         Assert.Contains("stderr-output", result.WarningCategories);
         Assert.DoesNotContain(prompt, result.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("REDACTED_RESPONSE", result.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("[redacted fixture response]", result.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
