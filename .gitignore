@@ -1,0 +1,9 @@
+# .NET / Visual Studio build output
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+TestResults/
+artifacts/
+publish/
