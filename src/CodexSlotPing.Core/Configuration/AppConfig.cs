@@ -2,23 +2,23 @@ namespace CodexSlotPing.Core.Configuration;
 
 public sealed record AppConfig
 {
-    public int SchemaVersion { get; init; } = 1;
+    public required int SchemaVersion { get; init; }
 
-    public bool Enabled { get; init; } = true;
+    public required bool Enabled { get; init; }
 
-    public IReadOnlyList<string> Slots { get; init; } = Array.Empty<string>();
+    public required IReadOnlyList<string> Slots { get; init; }
 
-    public string TimeZone { get; init; } = "SYSTEM";
+    public required string TimeZone { get; init; }
 
-    public string Model { get; init; } = "gpt-5.6-luna";
+    public required string Model { get; init; }
 
-    public string ReasoningEffort { get; init; } = "low";
+    public required string ReasoningEffort { get; init; }
 
-    public string Prompt { get; init; } = "Hi.";
+    public required string Prompt { get; init; }
 
-    public bool WakeToRun { get; init; }
+    public required bool WakeToRun { get; init; }
 
-    public int StrictSlotWindowMinutes { get; init; } = 3;
+    public required int StrictSlotWindowMinutes { get; init; }
 
-    public bool CaptureRawLogs { get; init; }
+    public required bool CaptureRawLogs { get; init; }
 }
