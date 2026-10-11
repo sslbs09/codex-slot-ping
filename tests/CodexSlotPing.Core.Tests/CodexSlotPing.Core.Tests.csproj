@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CodexSlotPing.Core\CodexSlotPing.Core.csproj" />
+    <ProjectReference Include="..\CodexSlotPing.FakeCodex\CodexSlotPing.FakeCodex.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
