@@ -2,6 +2,7 @@ using System.Windows;
 using CodexSlotPing.Core.Codex;
 using CodexSlotPing.Core.Configuration;
 using CodexSlotPing.Core.Scheduler;
+using WpfMessageBox = System.Windows.MessageBox;
 
 namespace CodexSlotPing.App;
 
@@ -90,7 +91,7 @@ public partial class SettingsWindow : Window
 
     private async void Install_Click(object sender, RoutedEventArgs e)
     {
-        var answer = MessageBox.Show(
+        var answer = WpfMessageBox.Show(
             "This creates or updates the owned Windows scheduled task. At each eligible slot it sends your configured prompt to Codex and may count toward usage limits. Continue?",
             "Confirm scheduler installation",
             MessageBoxButton.YesNo,
@@ -106,7 +107,7 @@ public partial class SettingsWindow : Window
 
     private async void Disable_Click(object sender, RoutedEventArgs e)
     {
-        var answer = MessageBox.Show("Disable the owned Codex Slot Ping scheduled task?", "Disable scheduler",
+        var answer = WpfMessageBox.Show("Disable the owned Codex Slot Ping scheduled task?", "Disable scheduler",
             MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
         if (answer == MessageBoxResult.Yes)
         {
@@ -116,7 +117,7 @@ public partial class SettingsWindow : Window
 
     private async void Remove_Click(object sender, RoutedEventArgs e)
     {
-        var answer = MessageBox.Show("Remove the owned Codex Slot Ping scheduled task? This does not delete your local settings or logs.",
+        var answer = WpfMessageBox.Show("Remove the owned Codex Slot Ping scheduled task? This does not delete your local settings or logs.",
             "Remove scheduler", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
         if (answer == MessageBoxResult.Yes)
         {
@@ -145,7 +146,7 @@ public partial class SettingsWindow : Window
 
     private async void TimezoneUpdate_Click(object sender, RoutedEventArgs e)
     {
-        var answer = MessageBox.Show(
+        var answer = WpfMessageBox.Show(
             "This saves the current Windows timezone and updates the owned scheduled task. Its current enabled or disabled state is preserved. Continue?",
             "Confirm timezone update",
             MessageBoxButton.YesNo,
@@ -189,7 +190,7 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        var answer = MessageBox.Show(
+        var answer = WpfMessageBox.Show(
             "Raw Codex output can contain responses and diagnostic text. It is stored locally and removed after 14 days. Enable raw capture?",
             "Confirm raw log capture",
             MessageBoxButton.YesNo,

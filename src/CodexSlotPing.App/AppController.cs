@@ -24,7 +24,12 @@ public sealed record AppScreenState(
     IReadOnlyList<TodaySlotState> TodaySlots,
     DateTimeOffset NowUtc,
     string CurrentWindowsTimeZoneId,
-    string LogsDirectory);
+    string LogsDirectory)
+{
+    public bool EffectiveWakeToRun => Scheduler.Exists && Scheduler.IsOwned && Scheduler.Readback is not null
+        ? Scheduler.Readback.WakeToRun
+        : Config.WakeToRun;
+}
 
 public sealed record ConfigSaveResult(
     bool Succeeded,
@@ -46,6 +51,7 @@ public sealed class AppController
     private readonly NextSlotCalculator _nextSlotCalculator;
     private readonly SchedulerHealthEvaluator _schedulerHealthEvaluator = new();
     private readonly TimezoneUpdateService _timezoneUpdateService;
+    private int _testNowActive;
 
     public AppController(
         IClock clock,
@@ -307,6 +313,12 @@ public sealed class AppController
             : new SchedulerOperationResult(false, readback.DiagnosticCategory ?? "scheduler-remove-unconfirmed", readback);
     }
 
+    public async Task<ConfigSaveResult> SetWakeToRunAsync(bool wakeToRun, CancellationToken cancellationToken)
+    {
+        var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
+        return await SaveSettingsAsync(config with { WakeToRun = wakeToRun }, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<TestRunResult?> RunTestNowAsync(bool userConfirmed, CancellationToken cancellationToken)
     {
         if (!userConfirmed)
@@ -314,16 +326,28 @@ public sealed class AppController
             return null;
         }
 
-        var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
-        var environment = await _environmentDetector.DetectAsync(cancellationToken).ConfigureAwait(false);
-        var validation = ConfigValidator.Validate(config, _timeZoneProvider.CurrentWindowsTimeZoneId,
-            environment.SupportedReasoningEfforts);
-        if (!validation.IsValid || validation.NormalizedConfig is null)
+        if (Interlocked.CompareExchange(ref _testNowActive, 1, 0) != 0)
         {
-            throw new InvalidOperationException(string.Join(Environment.NewLine, validation.Errors));
+            return null;
         }
 
-        return await _runTestNow(validation.NormalizedConfig, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
+            var environment = await _environmentDetector.DetectAsync(cancellationToken).ConfigureAwait(false);
+            var validation = ConfigValidator.Validate(config, _timeZoneProvider.CurrentWindowsTimeZoneId,
+                environment.SupportedReasoningEfforts);
+            if (!validation.IsValid || validation.NormalizedConfig is null)
+            {
+                throw new InvalidOperationException(string.Join(Environment.NewLine, validation.Errors));
+            }
+
+            return await _runTestNow(validation.NormalizedConfig, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Volatile.Write(ref _testNowActive, 0);
+        }
     }
 
     public async Task<TimezoneUpdateResult> ApplyCurrentTimeZoneChangeAsync(
