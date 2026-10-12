@@ -32,25 +32,30 @@ public partial class SettingsWindow : Window
         WakeCheck.IsChecked = config.WakeToRun;
         RawLogsCheck.IsChecked = config.CaptureRawLogs;
 
+        ReasoningCombo.DisplayMemberPath = nameof(LocalizedOption.Display);
+        ReasoningCombo.SelectedValuePath = nameof(LocalizedOption.Value);
         var reasoningValues = _screenState.Codex.SupportedReasoningEfforts.Count > 0
             ? _screenState.Codex.SupportedReasoningEfforts.OrderBy(value => value, StringComparer.Ordinal).ToArray()
             : CodexCliCapabilities.DocumentedReasoningEfforts.OrderBy(value => value, StringComparer.Ordinal).ToArray();
         foreach (var reasoning in reasoningValues.Append(config.ReasoningEffort).Distinct(StringComparer.Ordinal))
         {
-            ReasoningCombo.Items.Add(reasoning);
+            ReasoningCombo.Items.Add(new LocalizedOption(reasoning, UiText.FormatReasoningEffort(reasoning)));
         }
-        ReasoningCombo.SelectedItem = config.ReasoningEffort;
+        ReasoningCombo.SelectedValue = config.ReasoningEffort;
 
-        TimeZoneCombo.Items.Add("SYSTEM");
+        TimeZoneCombo.DisplayMemberPath = nameof(LocalizedOption.Display);
+        TimeZoneCombo.SelectedValuePath = nameof(LocalizedOption.Value);
+        AddTimeZoneOption("SYSTEM");
         if (!string.Equals(_screenState.CurrentWindowsTimeZoneId, "SYSTEM", StringComparison.OrdinalIgnoreCase))
         {
-            TimeZoneCombo.Items.Add(_screenState.CurrentWindowsTimeZoneId);
+            AddTimeZoneOption(_screenState.CurrentWindowsTimeZoneId);
         }
-        if (!TimeZoneCombo.Items.Contains(config.TimeZone))
+        if (!TimeZoneCombo.Items.Cast<LocalizedOption>().Any(option =>
+                string.Equals(option.Value, config.TimeZone, StringComparison.OrdinalIgnoreCase)))
         {
-            TimeZoneCombo.Items.Add(config.TimeZone);
+            AddTimeZoneOption(config.TimeZone);
         }
-        TimeZoneCombo.SelectedItem = config.TimeZone;
+        TimeZoneCombo.SelectedValue = config.TimeZone;
 
         TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
             ? Visibility.Visible
@@ -66,34 +71,34 @@ public partial class SettingsWindow : Window
             {
                 Slots = [Slot1Text.Text.Trim(), Slot2Text.Text.Trim(), Slot3Text.Text.Trim(), Slot4Text.Text.Trim()],
                 Model = ModelText.Text.Trim(),
-                ReasoningEffort = ReasoningCombo.SelectedItem?.ToString() ?? string.Empty,
+                ReasoningEffort = ReasoningCombo.SelectedValue?.ToString() ?? string.Empty,
                 Prompt = PromptText.Text,
-                TimeZone = TimeZoneCombo.SelectedItem?.ToString() ?? "SYSTEM",
+                TimeZone = TimeZoneCombo.SelectedValue?.ToString() ?? "SYSTEM",
                 WakeToRun = WakeCheck.IsChecked == true,
                 CaptureRawLogs = RawLogsCheck.IsChecked == true
             };
             var result = await _controller.SaveSettingsAsync(candidate, CancellationToken.None);
             if (!result.Succeeded)
             {
-                StatusText.Text = string.Join(Environment.NewLine, result.Errors);
+                StatusText.Text = string.Join(Environment.NewLine, result.Errors.Select(error => UiText.FormatDiagnostic(error)));
                 return;
             }
 
-            StatusText.Text = "Settings saved.";
+            StatusText.Text = UiText.Get("Settings.Saved");
             DialogResult = true;
             Close();
         }
         catch (Exception exception)
         {
-            StatusText.Text = exception.Message;
+            StatusText.Text = UiText.Format("Diagnostic.SettingsException", exception.Message);
         }
     }
 
     private async void Install_Click(object sender, RoutedEventArgs e)
     {
         var answer = WpfMessageBox.Show(
-            "This creates or updates the owned Windows scheduled task. At each eligible slot it sends your configured prompt to Codex and may count toward usage limits. Continue?",
-            "Confirm scheduler installation",
+            UiText.Get("Settings.InstallConfirmBody"),
+            UiText.Get("Settings.InstallConfirmTitle"),
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.No);
@@ -102,37 +107,39 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        await RunSchedulerOperationAsync(_controller.InstallOrUpdateSchedulerAsync, "Scheduler installed and read back as ON.");
+        await RunSchedulerOperationAsync(_controller.InstallOrUpdateSchedulerAsync, "Settings.InstallSuccess");
     }
 
     private async void Disable_Click(object sender, RoutedEventArgs e)
     {
-        var answer = WpfMessageBox.Show("Disable the owned Codex Slot Ping scheduled task?", "Disable scheduler",
+        var answer = WpfMessageBox.Show(UiText.Get("Settings.DisableConfirmBody"), UiText.Get("Settings.DisableConfirmTitle"),
             MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
         if (answer == MessageBoxResult.Yes)
         {
-            await RunSchedulerOperationAsync(_controller.DisableSchedulerAsync, "Scheduler is OFF.");
+            await RunSchedulerOperationAsync(_controller.DisableSchedulerAsync, "Settings.DisableSuccess");
         }
     }
 
     private async void Remove_Click(object sender, RoutedEventArgs e)
     {
-        var answer = WpfMessageBox.Show("Remove the owned Codex Slot Ping scheduled task? This does not delete your local settings or logs.",
-            "Remove scheduler", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        var answer = WpfMessageBox.Show(UiText.Get("Settings.RemoveConfirmBody"),
+            UiText.Get("Settings.RemoveConfirmTitle"), MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
         if (answer == MessageBoxResult.Yes)
         {
-            await RunSchedulerOperationAsync(_controller.RemoveSchedulerAsync, "Owned scheduled task removed.");
+            await RunSchedulerOperationAsync(_controller.RemoveSchedulerAsync, "Settings.RemoveSuccess");
         }
     }
 
     private async Task RunSchedulerOperationAsync(
         Func<CancellationToken, Task<SchedulerOperationResult>> operation,
-        string successMessage)
+        string successMessageKey)
     {
         try
         {
             var result = await operation(CancellationToken.None);
-            StatusText.Text = result.Succeeded ? successMessage : result.DiagnosticCategory ?? "Scheduler operation failed.";
+            StatusText.Text = result.Succeeded
+                ? UiText.Get(successMessageKey)
+                : UiText.FormatDiagnostic(result.DiagnosticCategory ?? UiText.Get("Settings.OperationFailed"));
             _screenState = await _controller.RefreshAsync(CancellationToken.None);
             TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
                 ? Visibility.Visible
@@ -140,15 +147,15 @@ public partial class SettingsWindow : Window
         }
         catch (Exception exception)
         {
-            StatusText.Text = exception.Message;
+            StatusText.Text = UiText.Format("Settings.Exception", exception.Message);
         }
     }
 
     private async void TimezoneUpdate_Click(object sender, RoutedEventArgs e)
     {
         var answer = WpfMessageBox.Show(
-            "This saves the current Windows timezone and updates the owned scheduled task. Its current enabled or disabled state is preserved. Continue?",
-            "Confirm timezone update",
+            UiText.Get("Settings.TimezoneConfirmBody"),
+            UiText.Get("Settings.TimezoneConfirmTitle"),
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.No);
@@ -162,24 +169,25 @@ public partial class SettingsWindow : Window
             var result = await _controller.ApplyCurrentTimeZoneChangeAsync(true, CancellationToken.None);
             if (!result.Succeeded)
             {
-                StatusText.Text = result.DiagnosticCategory ?? "Timezone update failed.";
+                StatusText.Text = UiText.FormatDiagnostic(result.DiagnosticCategory ?? UiText.Get("Settings.TimezoneUpdateFailed"));
                 return;
             }
 
             _screenState = await _controller.RefreshAsync(CancellationToken.None);
             TimeZoneCombo.Items.Clear();
-            TimeZoneCombo.Items.Add("SYSTEM");
-            if (!TimeZoneCombo.Items.Contains(_screenState.CurrentWindowsTimeZoneId))
+            AddTimeZoneOption("SYSTEM");
+            if (!TimeZoneCombo.Items.Cast<LocalizedOption>().Any(option =>
+                    string.Equals(option.Value, _screenState.CurrentWindowsTimeZoneId, StringComparison.OrdinalIgnoreCase)))
             {
-                TimeZoneCombo.Items.Add(_screenState.CurrentWindowsTimeZoneId);
+                AddTimeZoneOption(_screenState.CurrentWindowsTimeZoneId);
             }
-            TimeZoneCombo.SelectedItem = _screenState.Config.TimeZone;
+            TimeZoneCombo.SelectedValue = _screenState.Config.TimeZone;
             TimezoneUpdateButton.Visibility = Visibility.Collapsed;
-            StatusText.Text = "Current timezone saved and scheduler readback verified.";
+            StatusText.Text = UiText.Get("Settings.TimezoneUpdated");
         }
         catch (Exception exception)
         {
-            StatusText.Text = exception.Message;
+            StatusText.Text = UiText.Format("Settings.Exception", exception.Message);
         }
     }
 
@@ -191,8 +199,8 @@ public partial class SettingsWindow : Window
         }
 
         var answer = WpfMessageBox.Show(
-            "Raw Codex output can contain responses and diagnostic text. It is stored locally and removed after 14 days. Enable raw capture?",
-            "Confirm raw log capture",
+            UiText.Get("Settings.RawLogsConfirmBody"),
+            UiText.Get("Settings.RawLogsConfirmTitle"),
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.No);
@@ -208,5 +216,12 @@ public partial class SettingsWindow : Window
     {
     }
 
+    private void AddTimeZoneOption(string value)
+    {
+        TimeZoneCombo.Items.Add(new LocalizedOption(value, UiText.FormatTimeZone(value)));
+    }
+
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    private sealed record LocalizedOption(string Value, string Display);
 }

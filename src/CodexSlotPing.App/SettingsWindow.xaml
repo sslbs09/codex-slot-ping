@@ -1,7 +1,8 @@
 <Window x:Class="CodexSlotPing.App.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Codex Slot Ping settings"
+        xmlns:loc="clr-namespace:CodexSlotPing.App.Localization"
+        Title="{loc:Loc Settings.WindowTitle}"
         Width="500"
         Height="760"
         MinWidth="460"
@@ -33,10 +34,10 @@
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="26,22,26,20">
-            <TextBlock Text="SETTINGS" FontSize="11" FontWeight="Bold" Foreground="#3C7657" />
-            <TextBlock Text="Schedule and request" FontSize="24" FontWeight="SemiBold" Margin="0,3,0,10" />
+            <TextBlock Text="{loc:Loc Settings.Header}" FontSize="11" FontWeight="Bold" Foreground="#3C7657" />
+            <TextBlock Text="{loc:Loc Settings.SectionTitle}" FontSize="24" FontWeight="SemiBold" Margin="0,3,0,10" />
 
-            <TextBlock Text="Four local times (24-hour HH:mm)" Style="{StaticResource FieldLabel}" />
+            <TextBlock Text="{loc:Loc Settings.FourLocalTimes}" Style="{StaticResource FieldLabel}" />
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -50,38 +51,38 @@
                 <TextBox x:Name="Slot4Text" Grid.Column="3" Style="{StaticResource FieldInput}" />
             </Grid>
 
-            <TextBlock Text="Model selection request" Style="{StaticResource FieldLabel}" />
+            <TextBlock Text="{loc:Loc Settings.ModelRequest}" Style="{StaticResource FieldLabel}" />
             <TextBox x:Name="ModelText" Style="{StaticResource FieldInput}" />
-            <TextBlock Text="Reasoning effort supported by the detected CLI" Style="{StaticResource FieldLabel}" />
+            <TextBlock Text="{loc:Loc Settings.ReasoningSupport}" Style="{StaticResource FieldLabel}" />
             <ComboBox x:Name="ReasoningCombo" Padding="7,5" Background="#FBFAF7" BorderBrush="#C9CEC8" />
 
-            <TextBlock Text="Prompt sent at each formal slot and by Test Now" Style="{StaticResource FieldLabel}" />
+            <TextBlock Text="{loc:Loc Settings.PromptLabel}" Style="{StaticResource FieldLabel}" />
             <TextBox x:Name="PromptText" Style="{StaticResource FieldInput}" MinHeight="72"
                      AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" />
 
-            <TextBlock Text="Timezone behavior" Style="{StaticResource FieldLabel}" />
+            <TextBlock Text="{loc:Loc Settings.TimezoneBehavior}" Style="{StaticResource FieldLabel}" />
             <ComboBox x:Name="TimeZoneCombo" Padding="7,5" Background="#FBFAF7" BorderBrush="#C9CEC8" />
-            <TextBlock Text="SYSTEM follows Windows. A timezone lock must match the current Windows timezone." FontSize="11"
+            <TextBlock Text="{loc:Loc Settings.SystemTimezoneDescription}" FontSize="11"
                        Foreground="#7A817B" TextWrapping="Wrap" Margin="0,4,0,0" />
-            <Button x:Name="TimezoneUpdateButton" Content="Confirm current timezone and update scheduler"
+            <Button x:Name="TimezoneUpdateButton" Content="{loc:Loc Settings.ConfirmTimezone}"
                     Style="{StaticResource ActionButton}" Visibility="Collapsed" HorizontalAlignment="Left"
                     Margin="0,7,0,0" Click="TimezoneUpdate_Click" />
 
-            <CheckBox x:Name="WakeCheck" Content="Wake the computer for scheduled slots" Margin="0,14,0,0" />
-            <CheckBox x:Name="RawLogsCheck" Content="Capture raw Codex output locally (14-day retention)"
+            <CheckBox x:Name="WakeCheck" Content="{loc:Loc Settings.WakeComputer}" Margin="0,14,0,0" />
+            <CheckBox x:Name="RawLogsCheck" Content="{loc:Loc Settings.RawLogs}"
                       Margin="0,10,0,0" Checked="RawLogs_Checked" Unchecked="RawLogs_Unchecked" />
-            <TextBlock Text="Raw output can contain Codex responses. It stays in your local logs folder and is removed after 14 days."
+            <TextBlock Text="{loc:Loc Settings.RawLogsExplanation}"
                        FontSize="11" Foreground="#7A817B" TextWrapping="Wrap" Margin="21,3,0,0" />
 
             <TextBlock x:Name="StatusText" Text="" Foreground="#8A4C24" TextWrapping="Wrap" Margin="0,14,0,8" />
             <WrapPanel>
-                <Button Content="Save settings" Style="{StaticResource ActionButton}" Click="Save_Click" />
-                <Button Content="Install / update scheduler" Style="{StaticResource ActionButton}" Click="Install_Click" />
-                <Button Content="Disable scheduler" Style="{StaticResource ActionButton}" Click="Disable_Click" />
-                <Button Content="Remove scheduler" Style="{StaticResource ActionButton}" Click="Remove_Click" />
-                <Button Content="Close" Style="{StaticResource ActionButton}" Click="Close_Click" />
+                <Button Content="{loc:Loc Settings.Save}" Style="{StaticResource ActionButton}" Click="Save_Click" />
+                <Button Content="{loc:Loc Settings.InstallScheduler}" Style="{StaticResource ActionButton}" Click="Install_Click" />
+                <Button Content="{loc:Loc Settings.DisableScheduler}" Style="{StaticResource ActionButton}" Click="Disable_Click" />
+                <Button Content="{loc:Loc Settings.RemoveScheduler}" Style="{StaticResource ActionButton}" Click="Remove_Click" />
+                <Button Content="{loc:Loc Settings.Close}" Style="{StaticResource ActionButton}" Click="Close_Click" />
             </WrapPanel>
-            <TextBlock Text="Installing enables four local-time triggers. Each eligible trigger can send the configured prompt to Codex and may count toward usage."
+            <TextBlock Text="{loc:Loc Settings.SchedulerWarning}"
                        FontSize="11" Foreground="#7A817B" TextWrapping="Wrap" Margin="0,2,0,0" />
         </StackPanel>
     </ScrollViewer>

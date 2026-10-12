@@ -1,6 +1,7 @@
 <Window x:Class="CodexSlotPing.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:CodexSlotPing.App.Localization"
         Title="Codex Slot Ping"
         Width="430"
         Height="700"
@@ -27,6 +28,34 @@
             <Setter Property="Foreground" Value="#26302A" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
+        <Style x:Key="ShortcutRow" TargetType="Button">
+            <Setter Property="Padding" Value="0,4" />
+            <Setter Property="Margin" Value="0,0,0,2" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="3"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Surface" Property="Background" Value="#ECEFEA" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Surface" Property="Background" Value="#ECEFEA" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -34,21 +63,21 @@
             <TextBlock Text="CODEX SLOT PING" FontSize="11" FontWeight="Bold" Foreground="#3C7657" />
             <TextBlock Text="Codex Slot Ping" FontSize="25" FontWeight="SemiBold" Margin="0,4,0,18" />
 
-            <TextBlock Text="CODEX" Style="{StaticResource SectionLabel}" />
+            <TextBlock Text="{loc:Loc Main.CodexHeader}" Style="{StaticResource SectionLabel}" />
             <StackPanel Orientation="Horizontal" Margin="0,8,0,2">
                 <TextBlock x:Name="ConnectionDot" Text="●" Foreground="#31845B" FontSize="15" Margin="0,0,8,0" />
-                <TextBlock x:Name="ConnectionStatusText" Text="Checking connection…" FontSize="15" FontWeight="SemiBold" />
+                <TextBlock x:Name="ConnectionStatusText" Text="{loc:Loc Main.ConnectionChecking}" FontSize="15" FontWeight="SemiBold" />
             </StackPanel>
             <TextBlock x:Name="LoginStatusText" Text="" Foreground="#606962" Margin="22,0,0,2" />
             <TextBlock x:Name="VersionText" Text="" Foreground="#818780" Margin="22,0,0,0" />
 
             <Border Height="1" Background="#D8DAD4" Margin="0,18,0,16" />
 
-            <TextBlock Text="NEXT SLOT" Style="{StaticResource SectionLabel}" />
+            <TextBlock Text="{loc:Loc Main.NextSlot}" Style="{StaticResource SectionLabel}" />
             <TextBlock x:Name="NextSlotTimeText" Text="—" FontSize="34" FontWeight="Light" Margin="0,3,0,0" />
-            <TextBlock x:Name="NextSlotCountdownText" Text="Waiting for schedule" FontSize="13" Foreground="#68706A" Margin="0,0,0,12" />
+            <TextBlock x:Name="NextSlotCountdownText" Text="{loc:Loc Main.WaitingForSchedule}" FontSize="13" Foreground="#68706A" Margin="0,0,0,12" />
 
-            <TextBlock Text="TODAY" Style="{StaticResource SectionLabel}" Margin="0,0,0,4" />
+            <TextBlock Text="{loc:Loc Main.Today}" Style="{StaticResource SectionLabel}" Margin="0,0,0,4" />
             <ItemsControl x:Name="TodayRows">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
@@ -66,38 +95,38 @@
 
             <Border Height="1" Background="#D8DAD4" Margin="0,14,0,12" />
 
-            <Grid Margin="0,0,0,3">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="112" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="Model" Foreground="#68706A" />
-                <TextBlock x:Name="ModelText" Grid.Column="1" Text="—" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
-            </Grid>
-            <Grid Margin="0,0,0,3">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="112" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="Reasoning" Foreground="#68706A" />
-                <TextBlock x:Name="ReasoningText" Grid.Column="1" Text="—" />
-            </Grid>
-            <Grid Margin="0,0,0,3">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="112" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="Scheduler" Foreground="#68706A" />
-                <TextBlock x:Name="SchedulerText" Grid.Column="1" Text="—" FontWeight="Medium" />
-            </Grid>
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="112" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="Wake computer" Foreground="#68706A" />
-                <TextBlock x:Name="WakeText" Grid.Column="1" Text="—" />
-            </Grid>
+            <Button Style="{StaticResource ShortcutRow}" Click="OpenSettingsShortcut_Click" ToolTip="{loc:Loc Main.OpenSettingHint}">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="112" /><ColumnDefinition Width="*" /><ColumnDefinition Width="18" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="{loc:Loc Main.Model}" Foreground="#68706A" />
+                    <TextBlock x:Name="ModelText" Grid.Column="1" Text="—" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="2" Text="›" Foreground="#7D837D" HorizontalAlignment="Right" />
+                </Grid>
+            </Button>
+            <Button Style="{StaticResource ShortcutRow}" Click="OpenSettingsShortcut_Click" ToolTip="{loc:Loc Main.OpenSettingHint}">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="112" /><ColumnDefinition Width="*" /><ColumnDefinition Width="18" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="{loc:Loc Main.Reasoning}" Foreground="#68706A" />
+                    <TextBlock x:Name="ReasoningText" Grid.Column="1" Text="—" />
+                    <TextBlock Grid.Column="2" Text="›" Foreground="#7D837D" HorizontalAlignment="Right" />
+                </Grid>
+            </Button>
+            <Button Style="{StaticResource ShortcutRow}" Click="OpenSettingsShortcut_Click" ToolTip="{loc:Loc Main.OpenSettingHint}">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="112" /><ColumnDefinition Width="*" /><ColumnDefinition Width="18" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="{loc:Loc Main.Scheduler}" Foreground="#68706A" />
+                    <TextBlock x:Name="SchedulerText" Grid.Column="1" Text="—" FontWeight="Medium" />
+                    <TextBlock Grid.Column="2" Text="›" Foreground="#7D837D" HorizontalAlignment="Right" />
+                </Grid>
+            </Button>
+            <Button Style="{StaticResource ShortcutRow}" Click="OpenSettingsShortcut_Click" ToolTip="{loc:Loc Main.OpenSettingHint}">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="112" /><ColumnDefinition Width="*" /><ColumnDefinition Width="18" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="{loc:Loc Main.WakeComputer}" Foreground="#68706A" />
+                    <TextBlock x:Name="WakeText" Grid.Column="1" Text="—" />
+                    <TextBlock Grid.Column="2" Text="›" Foreground="#7D837D" HorizontalAlignment="Right" />
+                </Grid>
+            </Button>
 
             <TextBlock x:Name="StatusMessageText" Text="" TextWrapping="Wrap" Foreground="#8A4C24" Margin="0,12,0,0" />
             <TextBox x:Name="EnvironmentInstructionsText"
@@ -109,18 +138,18 @@
                      BorderThickness="0"
                      Padding="8"
                      Margin="0,8,0,0" />
-            <Button x:Name="CopyInstructionsButton" Content="Copy instructions" Style="{StaticResource QuietButton}"
+            <Button x:Name="CopyInstructionsButton" Content="{loc:Loc Main.CopyInstructions}" Style="{StaticResource QuietButton}"
                     Visibility="Collapsed" HorizontalAlignment="Left" Margin="0,7,0,0" Click="CopyInstructions_Click" />
-            <Button x:Name="TimezoneActionButton" Content="Use current timezone and update scheduler"
+            <Button x:Name="TimezoneActionButton" Content="{loc:Loc Main.TimezoneAction}"
                     Style="{StaticResource QuietButton}" Visibility="Collapsed" HorizontalAlignment="Left"
                     Margin="0,8,0,0" Click="TimezoneAction_Click" />
 
             <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
-                <Button x:Name="TestNowButton" Content="Test now" Style="{StaticResource QuietButton}" Click="TestNow_Click" />
-                <Button x:Name="SettingsButton" Content="Settings" Style="{StaticResource QuietButton}" Click="Settings_Click" />
-                <Button x:Name="OpenLogsButton" Content="Open logs" Style="{StaticResource QuietButton}" Click="OpenLogs_Click" />
+                <Button x:Name="TestNowButton" Content="{loc:Loc Main.TestNow}" Style="{StaticResource QuietButton}" Click="TestNow_Click" />
+                <Button x:Name="SettingsButton" Content="{loc:Loc Main.Settings}" Style="{StaticResource QuietButton}" Click="Settings_Click" />
+                <Button x:Name="OpenLogsButton" Content="{loc:Loc Main.OpenLogs}" Style="{StaticResource QuietButton}" Click="OpenLogs_Click" />
             </StackPanel>
-            <TextBlock Text="Strict slot · missed slots are not replayed." FontSize="11" Foreground="#7D837D" Margin="0,16,0,0" />
+            <TextBlock Text="{loc:Loc Main.StrictSlot}" FontSize="11" Foreground="#7D837D" Margin="0,16,0,0" />
         </StackPanel>
     </ScrollViewer>
 </Window>

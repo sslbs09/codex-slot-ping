@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="Main.CodexHeader" xml:space="preserve"><value>CODEX</value></data>
+  <data name="Main.ConnectionChecking" xml:space="preserve"><value>正在检查连接…</value></data>
+  <data name="Main.Connected" xml:space="preserve"><value>已连接</value></data>
+  <data name="Main.NeedsAttention" xml:space="preserve"><value>需要处理</value></data>
+  <data name="Main.LoggedIn" xml:space="preserve"><value>已通过 ChatGPT 登录</value></data>
+  <data name="Main.LoginNotConfirmed" xml:space="preserve"><value>尚未确认 ChatGPT 登录状态</value></data>
+  <data name="Main.LoginUnknown" xml:space="preserve"><value>无法确认登录状态</value></data>
+  <data name="Main.CliVersionUnavailable" xml:space="preserve"><value>无法读取 Codex CLI 版本</value></data>
+  <data name="Main.NextSlot" xml:space="preserve"><value>下个时段</value></data>
+  <data name="Main.WaitingForSchedule" xml:space="preserve"><value>等待计划时段</value></data>
+  <data name="Main.UpdateTimezoneForNext" xml:space="preserve"><value>更新时区锁后才能计算下个时段。</value></data>
+  <data name="Main.NoEligibleFutureSlot" xml:space="preserve"><value>没有可用的未来时段。</value></data>
+  <data name="Main.AdmissionWindowClosesIn" xml:space="preserve"><value>执行窗口将在 {0} 后关闭</value></data>
+  <data name="Main.StartsIn" xml:space="preserve"><value>将在 {0} 后开始</value></data>
+  <data name="Main.Today" xml:space="preserve"><value>今天</value></data>
+  <data name="Main.Model" xml:space="preserve"><value>模型</value></data>
+  <data name="Main.Reasoning" xml:space="preserve"><value>推理强度</value></data>
+  <data name="Main.Scheduler" xml:space="preserve"><value>计划任务</value></data>
+  <data name="Main.WakeComputer" xml:space="preserve"><value>唤醒电脑</value></data>
+  <data name="Main.CopyInstructions" xml:space="preserve"><value>复制安装说明</value></data>
+  <data name="Main.TimezoneAction" xml:space="preserve"><value>使用当前时区并更新计划任务</value></data>
+  <data name="Main.TestNow" xml:space="preserve"><value>立即测试</value></data>
+  <data name="Main.Settings" xml:space="preserve"><value>设置</value></data>
+  <data name="Main.OpenLogs" xml:space="preserve"><value>打开日志</value></data>
+  <data name="Main.StrictSlot" xml:space="preserve"><value>严格时段 · 错过的时段不会补发。</value></data>
+  <data name="Main.OpenSettingHint" xml:space="preserve"><value>打开对应设置</value></data>
+  <data name="Main.OfficialCliInstructions" xml:space="preserve"><value>安装官方 Codex CLI：npm install -g @openai/codex&#xD;&#xA;然后使用 ChatGPT 账户登录：codex login</value></data>
+  <data name="Main.StatusRefreshFailed" xml:space="preserve"><value>刷新状态失败：{0}</value></data>
+  <data name="Main.TestNowRunning" xml:space="preserve"><value>立即测试正在运行，不会启动第二个请求。</value></data>
+  <data name="Main.TestNowAlreadyRunning" xml:space="preserve"><value>已有一个立即测试请求正在运行。</value></data>
+  <data name="Main.TestNowConfirmTitle" xml:space="preserve"><value>确认立即测试</value></data>
+  <data name="Main.TestNowConfirmBody" xml:space="preserve"><value>这会将当前配置的提示词作为真实请求发送给 Codex，并可能计入使用额度。是否继续？</value></data>
+  <data name="Main.TestNowResultTitle" xml:space="preserve"><value>立即测试结果</value></data>
+  <data name="Main.TestNowFailedTitle" xml:space="preserve"><value>立即测试失败</value></data>
+  <data name="Main.LogsOpenFailed" xml:space="preserve"><value>无法打开日志：{0}</value></data>
+  <data name="Main.InstructionsCopied" xml:space="preserve"><value>已复制官方安装和登录说明。</value></data>
+  <data name="Main.TimezoneChangeTitle" xml:space="preserve"><value>更新时区</value></data>
+  <data name="Main.TimezoneChangeBody" xml:space="preserve"><value>这会保存当前 Windows 时区并更新本应用拥有的计划任务。任务当前的启用或禁用状态会保留。是否继续？</value></data>
+  <data name="Main.TimezoneChangeFailed" xml:space="preserve"><value>时区更新失败。</value></data>
+  <data name="Scheduler.RepairPathChanged" xml:space="preserve"><value>计划任务需要修复，任务路径已变化。</value></data>
+  <data name="Scheduler.RepairContract" xml:space="preserve"><value>计划任务需要修复；读取到的配置与要求不一致。</value></data>
+  <data name="Scheduler.TimezoneChanged" xml:space="preserve"><value>Windows 时区已变化，需要更新计划任务。已配置：{0}；当前：{1}。</value></data>
+  <data name="Scheduler.Conflict" xml:space="preserve"><value>发现同名任务，但它不属于本应用；已保留原样。</value></data>
+  <data name="Scheduler.ReadFailed" xml:space="preserve"><value>无法确认 Windows 计划任务的状态。</value></data>
+  <data name="Diagnostic.CodexNotFound" xml:space="preserve"><value>未找到 Codex CLI，或其本机可执行文件缺失。</value></data>
+  <data name="Diagnostic.CliVersionUnknown" xml:space="preserve"><value>无法确认 Codex CLI 版本。</value></data>
+  <data name="Diagnostic.LoginUnknown" xml:space="preserve"><value>无法确认 ChatGPT 登录状态。</value></data>
+  <data name="Diagnostic.LoginNotConfirmed" xml:space="preserve"><value>尚未确认使用 ChatGPT 登录。</value></data>
+  <data name="Diagnostic.CliCapabilitiesUnknown" xml:space="preserve"><value>无法确认 Codex CLI 是否支持所需功能。</value></data>
+  <data name="Diagnostic.UnsupportedOption" xml:space="preserve"><value>当前 Codex CLI 不支持必需参数：{0}</value></data>
+  <data name="Diagnostic.SettingsSaveFailed" xml:space="preserve"><value>无法保存设置。</value></data>
+  <data name="Diagnostic.SettingsSavedSchedulerRepair" xml:space="preserve"><value>设置已保存，但计划任务需要修复。</value></data>
+  <data name="Diagnostic.SchedulerReadbackNeedsRepair" xml:space="preserve"><value>设置已保存，但计划任务回读结果仍需要修复。</value></data>
+  <data name="Diagnostic.SchedulerUnavailable" xml:space="preserve"><value>Windows 计划任务服务不可用。</value></data>
+  <data name="Diagnostic.SchedulerReadbackFailed" xml:space="preserve"><value>无法确认计划任务状态。</value></data>
+  <data name="Diagnostic.SchedulerRemoveFailed" xml:space="preserve"><value>无法确认计划任务已删除。</value></data>
+  <data name="Diagnostic.SchedulerUpdateFailed" xml:space="preserve"><value>计划任务更新失败，需要修复。</value></data>
+  <data name="Diagnostic.InvalidConfiguration" xml:space="preserve"><value>设置无效，请检查各项内容。</value></data>
+  <data name="Diagnostic.CliNotReady" xml:space="preserve"><value>Codex CLI 尚未就绪，请检查主界面的连接状态。</value></data>
+  <data name="Diagnostic.RunnerMissing" xml:space="preserve"><value>找不到本应用的计划任务执行程序。</value></data>
+  <data name="Diagnostic.TaskOwnershipConflict" xml:space="preserve"><value>发现同名任务，但它不属于本应用；已保留原样。</value></data>
+  <data name="Diagnostic.InvalidTaskDefinition" xml:space="preserve"><value>计划任务定义无效。</value></data>
+  <data name="Diagnostic.SchedulerPathChanged" xml:space="preserve"><value>计划任务的执行程序或路径已变化，需要修复。</value></data>
+  <data name="Diagnostic.OwnedTaskRequired" xml:space="preserve"><value>此操作需要本应用拥有的计划任务。</value></data>
+  <data name="Diagnostic.TimezoneConfigSaveFailed" xml:space="preserve"><value>无法保存时区设置。</value></data>
+  <data name="Diagnostic.StreamError" xml:space="preserve"><value>无法完整读取 Codex 输出。</value></data>
+  <data name="Diagnostic.ProcessStartFailed" xml:space="preserve"><value>无法启动 Codex。</value></data>
+  <data name="Diagnostic.Cancelled" xml:space="preserve"><value>Codex 进程在完成前已停止。</value></data>
+  <data name="Diagnostic.AgentMessageMissing" xml:space="preserve"><value>Codex 未返回可确认的代理回复。</value></data>
+  <data name="Diagnostic.UsageLimit" xml:space="preserve"><value>Codex 账户可能已达到使用额度限制。</value></data>
+  <data name="Diagnostic.StderrOutput" xml:space="preserve"><value>Codex 返回了诊断信息。</value></data>
+  <data name="Diagnostic.UnknownWithCode" xml:space="preserve"><value>操作未完成。诊断信息：{0}</value></data>
+  <data name="Diagnostic.SettingsException" xml:space="preserve"><value>无法保存设置：{0}</value></data>
+  <data name="Validation.SchemaVersion" xml:space="preserve"><value>设置版本不受支持。</value></data>
+  <data name="Validation.FourSlots" xml:space="preserve"><value>必须设置四个时段。</value></data>
+  <data name="Validation.SlotFormat" xml:space="preserve"><value>第 {0} 个时段必须使用 24 小时制 HH:mm 格式。</value></data>
+  <data name="Validation.UniqueSlots" xml:space="preserve"><value>四个时段不能重复。</value></data>
+  <data name="Validation.SlotGap" xml:space="preserve"><value>相邻时段至少间隔六分钟，跨午夜也适用。</value></data>
+  <data name="Validation.TimezoneRequired" xml:space="preserve"><value>时区必须为 SYSTEM 或 Windows 时区 ID。</value></data>
+  <data name="Validation.TimezoneMismatch" xml:space="preserve"><value>设置的时区与当前 Windows 时区不一致。</value></data>
+  <data name="Validation.ModelRequired" xml:space="preserve"><value>请选择模型。</value></data>
+  <data name="Validation.ReasoningUnsupported" xml:space="preserve"><value>当前 Codex CLI 不支持所选推理强度。</value></data>
+  <data name="Validation.PromptRequired" xml:space="preserve"><value>提示词不能为空。</value></data>
+  <data name="Validation.PromptUnicode" xml:space="preserve"><value>提示词包含无效的 Unicode 文本。</value></data>
+  <data name="Validation.PromptLength" xml:space="preserve"><value>提示词不能超过 200 个 Unicode 字符。</value></data>
+  <data name="Validation.StrictWindow" xml:space="preserve"><value>v0.1 的严格时段窗口固定为 3 分钟。</value></data>
+  <data name="Validation.TimezoneChangedBeforeSave" xml:space="preserve"><value>Windows 时区已变化。保存前请确认更新时区设置和本应用拥有的计划任务。</value></data>
+  <data name="Reasoning.Low" xml:space="preserve"><value>低</value></data>
+  <data name="Reasoning.Medium" xml:space="preserve"><value>中</value></data>
+  <data name="Reasoning.High" xml:space="preserve"><value>高</value></data>
+  <data name="Reasoning.XHigh" xml:space="preserve"><value>极高</value></data>
+  <data name="Reasoning.Max" xml:space="preserve"><value>最大</value></data>
+  <data name="Reasoning.Ultra" xml:space="preserve"><value>超高</value></data>
+  <data name="State.Enabled" xml:space="preserve"><value>已启用</value></data>
+  <data name="State.Disabled" xml:space="preserve"><value>未启用</value></data>
+  <data name="State.NotInstalled" xml:space="preserve"><value>未安装</value></data>
+  <data name="State.NeedsRepair" xml:space="preserve"><value>需要修复</value></data>
+  <data name="State.TimezoneChanged" xml:space="preserve"><value>时区已变化</value></data>
+  <data name="State.Conflict" xml:space="preserve"><value>存在冲突</value></data>
+  <data name="State.Unknown" xml:space="preserve"><value>未知</value></data>
+  <data name="Slot.Confirmed" xml:space="preserve"><value>✓ 已确认</value></data>
+  <data name="Slot.AttemptedUnconfirmed" xml:space="preserve"><value>△ 已尝试 · 未确认</value></data>
+  <data name="Slot.PrelaunchFailed" xml:space="preserve"><value>× 启动前失败</value></data>
+  <data name="Slot.Missed" xml:space="preserve"><value>– 已错过</value></data>
+  <data name="Slot.InProgress" xml:space="preserve"><value>○ 进行中</value></data>
+  <data name="Slot.Pending" xml:space="preserve"><value>○ 待执行</value></data>
+  <data name="TestResult.Summary" xml:space="preserve"><value>{0}&#xD;&#xA;耗时：{1} 毫秒</value></data>
+  <data name="TestResult.Reason" xml:space="preserve"><value>原因：{0}</value></data>
+  <data name="Tray.Open" xml:space="preserve"><value>打开</value></data>
+  <data name="Tray.TestNow" xml:space="preserve"><value>立即测试</value></data>
+  <data name="Tray.SchedulerLabel" xml:space="preserve"><value>计划任务</value></data>
+  <data name="Tray.SchedulerState" xml:space="preserve"><value>计划任务：{0}</value></data>
+  <data name="Tray.WakeComputer" xml:space="preserve"><value>唤醒电脑</value></data>
+  <data name="Tray.OpenLogs" xml:space="preserve"><value>打开日志</value></data>
+  <data name="Tray.Exit" xml:space="preserve"><value>退出</value></data>
+  <data name="Settings.WindowTitle" xml:space="preserve"><value>Codex Slot Ping 设置</value></data>
+  <data name="Settings.Header" xml:space="preserve"><value>设置</value></data>
+  <data name="Settings.SectionTitle" xml:space="preserve"><value>调度与请求</value></data>
+  <data name="Settings.FourLocalTimes" xml:space="preserve"><value>四个本地时段（24 小时制 HH:mm）</value></data>
+  <data name="Settings.ModelRequest" xml:space="preserve"><value>模型选择请求</value></data>
+  <data name="Settings.ReasoningSupport" xml:space="preserve"><value>当前 CLI 支持的推理强度</value></data>
+  <data name="Settings.PromptLabel" xml:space="preserve"><value>每个正式时段和“立即测试”发送的提示词</value></data>
+  <data name="Settings.TimezoneBehavior" xml:space="preserve"><value>时区行为</value></data>
+  <data name="Settings.SystemTimezoneDescription" xml:space="preserve"><value>“跟随系统”会使用 Windows 时区。锁定的时区必须与当前 Windows 时区一致。</value></data>
+  <data name="Settings.TimezoneSystem" xml:space="preserve"><value>跟随系统</value></data>
+  <data name="Settings.ConfirmTimezone" xml:space="preserve"><value>确认当前时区并更新计划任务</value></data>
+  <data name="Settings.WakeComputer" xml:space="preserve"><value>在计划时段唤醒电脑</value></data>
+  <data name="Settings.RawLogs" xml:space="preserve"><value>在本地保存 Codex 原始输出（保留 14 天）</value></data>
+  <data name="Settings.RawLogsExplanation" xml:space="preserve"><value>原始输出可能包含 Codex 回复。文件保存在本地日志目录，并会在 14 天后删除。</value></data>
+  <data name="Settings.Save" xml:space="preserve"><value>保存设置</value></data>
+  <data name="Settings.InstallScheduler" xml:space="preserve"><value>安装 / 更新计划任务</value></data>
+  <data name="Settings.DisableScheduler" xml:space="preserve"><value>禁用计划任务</value></data>
+  <data name="Settings.RemoveScheduler" xml:space="preserve"><value>删除计划任务</value></data>
+  <data name="Settings.Close" xml:space="preserve"><value>关闭</value></data>
+  <data name="Settings.SchedulerWarning" xml:space="preserve"><value>安装后会创建四个本地时间触发器。每个符合条件的触发器都可能向 Codex 发送已配置的提示词，并计入使用额度。</value></data>
+  <data name="Settings.Saved" xml:space="preserve"><value>设置已保存。</value></data>
+  <data name="Settings.InstallConfirmTitle" xml:space="preserve"><value>确认安装计划任务</value></data>
+  <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>这会创建或更新本应用拥有的 Windows 计划任务。每个符合条件的时段都会向 Codex 发送已配置的提示词，并可能计入使用额度。是否继续？</value></data>
+  <data name="Settings.InstallSuccess" xml:space="preserve"><value>计划任务已安装，回读状态为已启用。</value></data>
+  <data name="Settings.DisableConfirmTitle" xml:space="preserve"><value>禁用计划任务</value></data>
+  <data name="Settings.DisableConfirmBody" xml:space="preserve"><value>要禁用本应用拥有的 Codex Slot Ping 计划任务吗？</value></data>
+  <data name="Settings.DisableSuccess" xml:space="preserve"><value>计划任务已关闭。</value></data>
+  <data name="Settings.RemoveConfirmTitle" xml:space="preserve"><value>删除计划任务</value></data>
+  <data name="Settings.RemoveConfirmBody" xml:space="preserve"><value>要删除本应用拥有的 Codex Slot Ping 计划任务吗？本地设置和日志不会删除。</value></data>
+  <data name="Settings.RemoveSuccess" xml:space="preserve"><value>已删除本应用拥有的计划任务。</value></data>
+  <data name="Settings.OperationFailed" xml:space="preserve"><value>计划任务操作失败。</value></data>
+  <data name="Settings.TimezoneConfirmTitle" xml:space="preserve"><value>确认更新时区</value></data>
+  <data name="Settings.TimezoneConfirmBody" xml:space="preserve"><value>这会保存当前 Windows 时区并更新本应用拥有的计划任务，同时保留任务当前的启用或禁用状态。是否继续？</value></data>
+  <data name="Settings.TimezoneUpdated" xml:space="preserve"><value>当前时区已保存，计划任务回读验证通过。</value></data>
+  <data name="Settings.TimezoneUpdateFailed" xml:space="preserve"><value>时区更新失败。</value></data>
+  <data name="Settings.RawLogsConfirmTitle" xml:space="preserve"><value>确认保存原始日志</value></data>
+  <data name="Settings.RawLogsConfirmBody" xml:space="preserve"><value>Codex 原始输出可能包含回复和诊断文本。内容保存在本地并于 14 天后删除。要启用原始输出记录吗？</value></data>
+  <data name="Settings.Exception" xml:space="preserve"><value>操作失败：{0}</value></data>
+  <data name="Exit.TestNowRunning" xml:space="preserve"><value>立即测试仍在运行。请等待结果后再退出。</value></data>
+  <data name="Exit.PreferenceSaveFailed" xml:space="preserve"><value>应用仍会退出，但无法保存此偏好设置：{0}</value></data>
+  <data name="Exit.WarningTitle" xml:space="preserve"><value>Codex Slot Ping 正在运行计划任务</value></data>
+  <data name="Exit.SuppressWarning" xml:space="preserve"><value>不再显示此提醒</value></data>
+  <data name="Exit.Warning" xml:space="preserve"><value>关闭 Codex Slot Ping 不会停用计划时段。</value></data>
+  <data name="Exit.Explanation" xml:space="preserve"><value>计划任务独立于此窗口运行。退出只会关闭应用。</value></data>
+  <data name="Exit.ExitApp" xml:space="preserve"><value>退出应用</value></data>
+  <data name="Exit.Cancel" xml:space="preserve"><value>取消</value></data>
+</root>

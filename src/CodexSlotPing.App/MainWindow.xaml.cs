@@ -19,9 +19,6 @@ namespace CodexSlotPing.App;
 
 public partial class MainWindow : Window
 {
-    private const string OfficialCliInstructions =
-        "Install the official Codex CLI: npm install -g @openai/codex\r\nThen sign in with your ChatGPT account: codex login";
-
     private readonly AppController _controller;
     private UiPreferencesStore? _preferencesStore;
     private TrayIconController? _tray;
@@ -66,9 +63,9 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            StatusMessageText.Text = $"Status could not be refreshed: {exception.Message}";
+            StatusMessageText.Text = UiText.Format("Main.StatusRefreshFailed", exception.Message);
             ConnectionDot.Foreground = System.Windows.Media.Brushes.DarkOrange;
-            ConnectionStatusText.Text = "Needs attention";
+            ConnectionStatusText.Text = UiText.Get("Main.NeedsAttention");
         }
     }
 
@@ -76,21 +73,21 @@ public partial class MainWindow : Window
     {
         var codexReady = state.Codex.IsReady;
         ConnectionDot.Foreground = codexReady ? Brush("#31845B") : Brush("#B46935");
-        ConnectionStatusText.Text = codexReady ? "Connected" : "Needs attention";
+        ConnectionStatusText.Text = UiText.Get(codexReady ? "Main.Connected" : "Main.NeedsAttention");
         LoginStatusText.Text = state.Codex.ChatGptLoginConfirmed switch
         {
-            true => "Logged in using ChatGPT",
-            false => "ChatGPT login not confirmed",
-            _ => "Login status could not be confirmed"
+            true => UiText.Get("Main.LoggedIn"),
+            false => UiText.Get("Main.LoginNotConfirmed"),
+            _ => UiText.Get("Main.LoginUnknown")
         };
-        VersionText.Text = state.Codex.CliVersion ?? "Codex CLI version unavailable";
+        VersionText.Text = state.Codex.CliVersion ?? UiText.Get("Main.CliVersionUnavailable");
 
         if (state.NextSlot is null)
         {
             NextSlotTimeText.Text = "—";
             NextSlotCountdownText.Text = state.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
-                ? "Update the timezone lock to calculate the next slot."
-                : "No eligible future slot is available.";
+                ? UiText.Get("Main.UpdateTimezoneForNext")
+                : UiText.Get("Main.NoEligibleFutureSlot");
         }
         else
         {
@@ -102,23 +99,23 @@ public partial class MainWindow : Window
                 ? windowEnd - state.NowUtc
                 : state.NextSlot.StartUtc - state.NowUtc;
             NextSlotCountdownText.Text = state.NowUtc >= state.NextSlot.StartUtc && state.NowUtc < windowEnd
-                ? $"Admission window closes in {FormatDuration(remaining)}"
-                : $"Starts in {FormatDuration(remaining)}";
+                ? UiText.Format("Main.AdmissionWindowClosesIn", FormatDuration(remaining))
+                : UiText.Format("Main.StartsIn", FormatDuration(remaining));
         }
 
         TodayRows.ItemsSource = state.TodaySlots.Select(slot => new TodayRow(
             slot.LocalTime.ToString("HH:mm"),
             FormatSlotStatus(slot.Status))).ToArray();
         ModelText.Text = state.Config.Model;
-        ReasoningText.Text = state.Config.ReasoningEffort;
+        ReasoningText.Text = UiText.FormatReasoningEffort(state.Config.ReasoningEffort);
         SchedulerText.Text = FormatScheduler(state.Scheduler);
-        WakeText.Text = state.EffectiveWakeToRun ? "ON" : "OFF";
+        WakeText.Text = UiText.Get(state.EffectiveWakeToRun ? "State.Enabled" : "State.Disabled");
 
         var messages = new List<string>();
         if (!codexReady)
         {
-            messages.Add(string.Join(" · ", state.Codex.DiagnosticCodes));
-            EnvironmentInstructionsText.Text = OfficialCliInstructions;
+            messages.Add(UiText.FormatCodexDiagnostics(state.Codex.DiagnosticCodes));
+            EnvironmentInstructionsText.Text = UiText.Get("Main.OfficialCliInstructions");
             EnvironmentInstructionsText.Visibility = Visibility.Visible;
             CopyInstructionsButton.Visibility = Visibility.Visible;
         }
@@ -132,17 +129,17 @@ public partial class MainWindow : Window
         {
             case SchedulerState.NEEDS_REPAIR:
                 messages.Add(state.Scheduler.DiagnosticCategory == "runner-action-mismatch"
-                    ? "Scheduler needs repair / path changed."
-                    : "Scheduler needs repair. Readback does not match the required contract.");
+                    ? UiText.Get("Scheduler.RepairPathChanged")
+                    : UiText.Get("Scheduler.RepairContract"));
                 break;
             case SchedulerState.TIMEZONE_CHANGED:
-                messages.Add($"Timezone changed / scheduler needs update. Configured: {state.Config.TimeZone}; current: {state.CurrentWindowsTimeZoneId}.");
+                messages.Add(UiText.Format("Scheduler.TimezoneChanged", state.Config.TimeZone, state.CurrentWindowsTimeZoneId));
                 break;
             case SchedulerState.CONFLICT:
-                messages.Add("A same-name task is not owned by this app; it was left untouched.");
+                messages.Add(UiText.Get("Scheduler.Conflict"));
                 break;
             case SchedulerState.ERROR:
-                messages.Add("Task Scheduler state could not be verified.");
+                messages.Add(UiText.Get("Scheduler.ReadFailed"));
                 break;
         }
 
@@ -164,8 +161,8 @@ public partial class MainWindow : Window
         ShowFromTray();
 
         var answer = WpfMessageBox.Show(
-            "This sends your configured prompt to Codex as a real request and may count toward usage limits. Continue?",
-            "Confirm Test Now",
+            UiText.Get("Main.TestNowConfirmBody"),
+            UiText.Get("Main.TestNowConfirmTitle"),
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.No);
@@ -177,26 +174,27 @@ public partial class MainWindow : Window
         _testNowRunning = true;
         TestNowButton.IsEnabled = false;
         _tray?.SetTestNowRunning(true);
-        StatusMessageText.Text = "Test Now is running. A second request will not be started.";
+        StatusMessageText.Text = UiText.Get("Main.TestNowRunning");
         try
         {
             var result = await _controller.RunTestNowAsync(true, CancellationToken.None);
             if (result is not null)
             {
-                WpfMessageBox.Show(FormatTestResult(result), "Test Now result", MessageBoxButton.OK,
+                WpfMessageBox.Show(FormatTestResult(result), UiText.Get("Main.TestNowResultTitle"), MessageBoxButton.OK,
                     result.Invocation.Classification == CodexResultClassification.CONFIRMED_SUCCESS
                         ? MessageBoxImage.Information
                         : MessageBoxImage.Warning);
             }
             else
             {
-                StatusMessageText.Text = "A Test Now request is already running.";
+                StatusMessageText.Text = UiText.Get("Main.TestNowAlreadyRunning");
             }
             await RefreshAsync();
         }
         catch (Exception exception)
         {
-            WpfMessageBox.Show(exception.Message, "Test Now failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            WpfMessageBox.Show(UiText.Format("Settings.Exception", exception.Message),
+                UiText.Get("Main.TestNowFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -206,7 +204,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void Settings_Click(object sender, RoutedEventArgs e)
+    private async void Settings_Click(object sender, RoutedEventArgs e) => await OpenSettingsAsync();
+
+    private async void OpenSettingsShortcut_Click(object sender, RoutedEventArgs e) => await OpenSettingsAsync();
+
+    private async Task OpenSettingsAsync()
     {
         if (_screenState is null)
         {
@@ -241,7 +243,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            WpfMessageBox.Show($"Logs could not be opened: {exception.Message}", "Open logs", MessageBoxButton.OK,
+            WpfMessageBox.Show(UiText.Format("Main.LogsOpenFailed", exception.Message), UiText.Get("Main.OpenLogs"), MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
     }
@@ -271,7 +273,7 @@ public partial class MainWindow : Window
     {
         if (_testNowRunning)
         {
-            WpfMessageBox.Show(AppExitPolicy.TestNowExitMessage, "Codex Slot Ping", MessageBoxButton.OK,
+            WpfMessageBox.Show(UiText.Get("Exit.TestNowRunning"), "Codex Slot Ping", MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return;
         }
@@ -311,7 +313,7 @@ public partial class MainWindow : Window
                 }
                 catch (Exception exception)
                 {
-                    WpfMessageBox.Show($"Exit will continue, but the preference could not be saved: {exception.Message}",
+                    WpfMessageBox.Show(UiText.Format("Exit.PreferenceSaveFailed", exception.Message),
                         "Codex Slot Ping", MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
             }
@@ -324,7 +326,7 @@ public partial class MainWindow : Window
                 System.Windows.Application.Current.Shutdown();
             }))
         {
-            WpfMessageBox.Show(AppExitPolicy.TestNowExitMessage, "Codex Slot Ping", MessageBoxButton.OK,
+            WpfMessageBox.Show(UiText.Get("Exit.TestNowRunning"), "Codex Slot Ping", MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
     }
@@ -343,15 +345,15 @@ public partial class MainWindow : Window
 
     private void CopyInstructions_Click(object sender, RoutedEventArgs e)
     {
-        WpfClipboard.SetText(OfficialCliInstructions);
-        StatusMessageText.Text = "Official install and login instructions copied.";
+        WpfClipboard.SetText(UiText.Get("Main.OfficialCliInstructions"));
+        StatusMessageText.Text = UiText.Get("Main.InstructionsCopied");
     }
 
     private async void TimezoneAction_Click(object sender, RoutedEventArgs e)
     {
         var answer = WpfMessageBox.Show(
-            "This saves the current Windows timezone and updates the owned scheduled task. The task's enabled or disabled state will be preserved. Continue?",
-            "Update timezone",
+            UiText.Get("Main.TimezoneChangeBody"),
+            UiText.Get("Main.TimezoneChangeTitle"),
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.No);
@@ -363,36 +365,20 @@ public partial class MainWindow : Window
         var result = await _controller.ApplyCurrentTimeZoneChangeAsync(true, CancellationToken.None);
         if (!result.Succeeded)
         {
-            WpfMessageBox.Show(result.DiagnosticCategory ?? "Timezone update failed.", "Timezone update",
+            WpfMessageBox.Show(UiText.FormatDiagnostic(result.DiagnosticCategory ?? UiText.Get("Main.TimezoneChangeFailed")), UiText.Get("Main.TimezoneChangeTitle"),
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
         await RefreshAsync();
     }
 
-    private static string FormatSlotStatus(FormalSlotStatus status) => status switch
-    {
-        FormalSlotStatus.CONFIRMED_SUCCESS => "✓ Confirmed",
-        FormalSlotStatus.ATTEMPTED_UNCONFIRMED => "△ Attempted · unconfirmed",
-        FormalSlotStatus.PRELAUNCH_FAILED => "× Prelaunch failed",
-        FormalSlotStatus.MISSED => "– Missed",
-        FormalSlotStatus.CLAIMED => "○ In progress",
-        _ => "○ Pending"
-    };
+    private static string FormatSlotStatus(FormalSlotStatus status) => UiText.FormatSlotStatus(status);
 
-    private static string FormatScheduler(SchedulerStatus status) => status.State switch
-    {
-        SchedulerState.ON or SchedulerState.OWNED_ENABLED => "ON",
-        SchedulerState.OFF or SchedulerState.OWNED_DISABLED or SchedulerState.NOT_INSTALLED => "OFF",
-        SchedulerState.NEEDS_REPAIR => "Needs repair",
-        SchedulerState.TIMEZONE_CHANGED => "Timezone changed",
-        SchedulerState.CONFLICT => "Conflict",
-        SchedulerState.ERROR => "Unknown",
-        _ => "Unknown"
-    };
+    private static string FormatScheduler(SchedulerStatus status) => UiText.FormatSchedulerState(status.State);
 
-    private static string FormatTestResult(TestRunResult result) =>
-        $"{result.Invocation.Classification}\r\nElapsed: {result.Invocation.ElapsedMilliseconds} ms" +
-        (result.Invocation.DiagnosticCategory is null ? string.Empty : $"\r\nReason: {result.Invocation.DiagnosticCategory}");
+    private static string FormatTestResult(TestRunResult result) => UiText.FormatTestResult(
+        result.Invocation.Classification,
+        result.Invocation.ElapsedMilliseconds,
+        result.Invocation.DiagnosticCategory);
 
     private static string FormatDuration(TimeSpan duration)
     {
@@ -417,7 +403,7 @@ public partial class MainWindow : Window
 
         public ExitWarningDialog()
         {
-            Title = "Codex Slot Ping is scheduled";
+            Title = UiText.Get("Exit.WarningTitle");
             Width = 430;
             SizeToContent = SizeToContent.Height;
             ResizeMode = ResizeMode.NoResize;
@@ -427,28 +413,28 @@ public partial class MainWindow : Window
 
             _suppressCheckBox = new System.Windows.Controls.CheckBox
             {
-                Content = "Don't show this warning again",
+                Content = UiText.Get("Exit.SuppressWarning"),
                 Margin = new Thickness(0, 12, 0, 12)
             };
             var content = new StackPanel { Margin = new Thickness(22) };
             content.Children.Add(new TextBlock
             {
-                Text = AppExitPolicy.ExitWarning,
+                Text = UiText.Get("Exit.Warning"),
                 FontSize = 17,
                 FontWeight = FontWeights.SemiBold,
                 TextWrapping = TextWrapping.Wrap
             });
             content.Children.Add(new TextBlock
             {
-                Text = "The scheduled task runs independently of this window. Exit only closes the App.",
+                Text = UiText.Get("Exit.Explanation"),
                 Margin = new Thickness(0, 8, 0, 0),
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = Brush("#68706A")
             });
             content.Children.Add(_suppressCheckBox);
             var buttons = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = System.Windows.HorizontalAlignment.Right };
-            var exitButton = new WpfButton { Content = "Exit App", Padding = new Thickness(12, 6, 12, 6), IsDefault = true };
-            var cancelButton = new WpfButton { Content = "Cancel", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0), IsCancel = true };
+            var exitButton = new WpfButton { Content = UiText.Get("Exit.ExitApp"), Padding = new Thickness(12, 6, 12, 6), IsDefault = true };
+            var cancelButton = new WpfButton { Content = UiText.Get("Exit.Cancel"), Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0), IsCancel = true };
             exitButton.Click += (_, _) => DialogResult = true;
             buttons.Children.Add(cancelButton);
             buttons.Children.Add(exitButton);

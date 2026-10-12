@@ -6,8 +6,9 @@ namespace CodexSlotPing.App;
 
 public sealed class TrayIconController : IDisposable
 {
-    public static IReadOnlyList<string> MenuEntryNames { get; } =
-        ["Open", "Test now", "Scheduler state", "Wake computer", "Open logs", "Exit"];
+    public static IReadOnlyList<string> MenuEntryNames =>
+        [UiText.Get("Tray.Open"), UiText.Get("Tray.TestNow"), UiText.Get("Tray.SchedulerLabel"),
+            UiText.Get("Tray.WakeComputer"), UiText.Get("Tray.OpenLogs"), UiText.Get("Tray.Exit")];
 
     private readonly MainWindow _window;
     private readonly AppController _controller;
@@ -24,12 +25,13 @@ public sealed class TrayIconController : IDisposable
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
 
         var menu = new Forms.ContextMenuStrip();
-        var openItem = new Forms.ToolStripMenuItem("Open");
-        _testNowItem = new Forms.ToolStripMenuItem("Test now");
-        _schedulerItem = new Forms.ToolStripMenuItem("Scheduler state: checking") { Enabled = false };
-        _wakeItem = new Forms.ToolStripMenuItem("Wake computer") { CheckOnClick = true };
-        var logsItem = new Forms.ToolStripMenuItem("Open logs");
-        var exitItem = new Forms.ToolStripMenuItem("Exit");
+        var labels = MenuEntryNames;
+        var openItem = new Forms.ToolStripMenuItem(labels[0]);
+        _testNowItem = new Forms.ToolStripMenuItem(labels[1]);
+        _schedulerItem = new Forms.ToolStripMenuItem(UiText.Format("Tray.SchedulerState", UiText.Get("State.Unknown"))) { Enabled = false };
+        _wakeItem = new Forms.ToolStripMenuItem(labels[3]) { CheckOnClick = true };
+        var logsItem = new Forms.ToolStripMenuItem(labels[4]);
+        var exitItem = new Forms.ToolStripMenuItem(labels[5]);
 
         openItem.Click += (_, _) => _window.ShowFromTray();
         _testNowItem.Click += async (_, _) => await _window.RunTestNowFromTrayAsync();
@@ -51,7 +53,7 @@ public sealed class TrayIconController : IDisposable
     public void UpdateState(AppScreenState state)
     {
         ArgumentNullException.ThrowIfNull(state);
-        _schedulerItem.Text = $"Scheduler state: {state.Scheduler.State}";
+        _schedulerItem.Text = UiText.FormatTraySchedulerState(state.Scheduler.State);
         _updatingWakeState = true;
         _wakeItem.Checked = state.EffectiveWakeToRun;
         _updatingWakeState = false;
@@ -84,7 +86,7 @@ public sealed class TrayIconController : IDisposable
             var result = await _controller.SetWakeToRunAsync(_wakeItem.Checked, CancellationToken.None);
             if (!result.Succeeded)
             {
-                _window.ShowTrayMessage(result.Errors.FirstOrDefault() ?? "Wake setting could not be saved.");
+                _window.ShowTrayMessage(UiText.FormatDiagnostic(result.Errors.FirstOrDefault() ?? UiText.Get("Diagnostic.SettingsSaveFailed")));
                 var state = await _controller.RefreshAsync(CancellationToken.None);
                 UpdateState(state);
                 return;
@@ -95,7 +97,7 @@ public sealed class TrayIconController : IDisposable
         }
         catch (Exception exception)
         {
-            _window.ShowTrayMessage(exception.Message);
+            _window.ShowTrayMessage(UiText.Format("Settings.Exception", exception.Message));
             _updatingWakeState = true;
             _wakeItem.Checked = !_wakeItem.Checked;
             _updatingWakeState = false;
