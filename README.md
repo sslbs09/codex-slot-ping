@@ -1,62 +1,67 @@
 # Codex Slot Ping
 
-Codex Slot Ping is an independent Windows tray utility that runs a small number of user-configured Codex CLI requests at fixed local times.
+Windows 托盘工具，可在明确配置的时间通过官方 Codex CLI 发起极小的真实请求，并管理计划任务、执行状态、日志和 fail-closed 控制。真实请求可能计入 Codex 使用额度。
 
-> **Engine baseline only.** v0.1 uses four fixed daily slots. It does not model rolling usage windows, weekly quota exhaustion, or manual Codex activity. Scheduling Semantics v2 is required before a public `v0.1.0` release.
+A small Windows tray utility for scheduled Codex CLI requests.
 
-## What it does
+The project is in early development, with no public release yet.
 
-- Runs four configurable local-time slots through Windows Task Scheduler.
-- Uses an existing Codex CLI installation and its existing ChatGPT login.
-- Claims each formal slot before dispatch. A claimed slot is never retried, and missed slots are never replayed.
-- Runs each request in a short-lived Runner process. The App can close while Task Scheduler remains active.
-- Stores configuration, execution state, and logs under `%LOCALAPPDATA%\CodexSlotPing`.
-- Ships as a self-contained Windows x64 ZIP; installing a separate .NET runtime is not required.
+## 当前状态
 
-Codex Slot Ping does not install Codex, use API keys, automate a browser, or run a background daemon. Task Scheduler directly starts the bundled Runner.
+**Early development / pre-release。** 当前版本仍是固定四个本地时间 slot 的 baseline，尚未完成动态调度和最终验收。
 
-## Requirements
+已完成：
 
-- Windows x64.
-- The official Codex CLI installed and logged in with the ChatGPT account you intend to use.
-- Internet access when Codex runs a request.
+- WPF desktop shell、托盘和 single-instance
+- 本地 Settings 与 Test Now 确认门
+- Windows Task Scheduler baseline
+- 结构化执行状态
+- 简体中文界面和 English fallback
 
-Codex Slot Ping does not install or sign in to Codex for you. If needed, install the official CLI and run `codex login` yourself. Do not add API keys for this utility.
+未完成：
 
-## Use the portable ZIP
+- Scheduling Semantics v2
+- 动态 usage-window 调度
+- weekly quota 处理和手动 Codex 使用观察
+- 最终人工验收与真实请求 E2E
 
-1. Extract the ZIP to a folder you control.
-2. Start `CodexSlotPing.App.exe`.
-3. Set the four local times, model selection request, reasoning effort, and prompt in **Settings**.
-4. Select **Test now** only after reading the confirmation. It sends the configured prompt as a real Codex request and may count toward usage limits.
-5. Select **Install / update scheduler** only when you want the formal slots enabled. The confirmation explains that future eligible slots send the configured prompt.
+## 当前工作方式
 
-The ZIP layout is:
+当前 baseline 使用四个明确的本地时间：07:00、12:01、17:01、22:01。每个 slot 独立判断 eligibility；错过的 slot 不补跑。Test Now 会先显示确认门。固定四 slot 只是当前实现，后续计划改为动态调度。
 
-```text
-CodexSlotPing.App.exe
-... self-contained App files ...
-Runner/
-  CodexSlotPing.Runner.exe
-  ... self-contained Runner files ...
-```
+## 安全边界
 
-Keep the `Runner` folder beside the App. Moving or renaming the extracted folder changes the Runner path; open the App and update the owned scheduler task afterward. User data remains in `%LOCALAPPDATA%` and is not part of the ZIP.
+- 不绕过 Codex 服务端限制，也不修改 Codex 配额。
+- 不调用私有 API；真实请求由官方 Codex CLI 发出。
+- 真实请求可能计入 Codex 使用额度。
+- eligibility 或运行状态无法确认时，按 fail-closed 处理。
+- Scheduler 由用户明确启用、停用或移除。
 
-## Scheduling behavior
+## 技术结构
 
-The v0.1 engine uses four strict local-time slots. Each slot has a three-minute admission period. The task is not configured to run after a missed start, the Runner rejects expired slots, and a durable claim is written before starting Codex. If the request may have reached Codex, the slot remains consumed even if its result cannot be confirmed.
+- `CodexSlotPing.App`：WPF 界面、设置、托盘和计划任务管理。
+- `CodexSlotPing.Core`：配置、slot eligibility、状态和可测试的 domain logic。
+- `CodexSlotPing.Runner`：由 Windows Task Scheduler 启动，执行真实 Codex 请求。
 
-The App reports Scheduler state from Windows Task Scheduler readback. Closing the window hides it to the tray. **Exit** closes only the App; it does not disable scheduled slots. Use **Disable scheduler** or **Remove scheduler** explicitly to change the owned task.
+## Development
 
-## Data and privacy
+Windows、WPF、.NET 10，依赖已安装并登录的官方 Codex CLI。当前项目测试结果：Core 105/105，Integration 57/57，共 162 项通过；self-contained win-x64 Release publish 已通过。
 
-The prompt is sent to Codex when Test Now is confirmed or an eligible formal slot is dispatched. Configuration and formal slot state stay under `%LOCALAPPDATA%\CodexSlotPing`. Structured logs omit prompt and response text. Raw output capture is optional, remains local, and is removed after 14 days.
+## 文档
 
-Codex Slot Ping does not read, copy, or modify Codex authentication files. It relies on the CLI's existing login.
+- [架构说明](docs/architecture.md)
+- [当前状态](docs/current-status.md)
+- [Scheduling Semantics v2 设计意图](docs/scheduling-v2.md)
 
-## Project status
+## Roadmap
 
-The fixed four-slot scheduler is an engine baseline, not the complete public-release scheduling policy. Dynamic rolling windows, weekly quota exhaustion, manual Codex usage, reset provenance, and uncertain-state handling remain for Scheduling Semantics v2. Do not publish a public `v0.1.0` release until that design is complete and accepted.
+- Scheduling Semantics v2
+- 动态 5h usage-window
+- 手动使用导致的窗口漂移处理
+- weekly quota exhaustion 处理
+- 最终人工验收与 live E2E
+- packaging / release
 
-**Independence notice:** Codex Slot Ping is an independent community utility. It is not affiliated with, endorsed by, or sponsored by OpenAI.
+## Status
+
+尚无公开版本，也没有发布 GitHub Release。
