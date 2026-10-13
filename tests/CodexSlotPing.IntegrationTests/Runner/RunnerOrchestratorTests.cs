@@ -13,6 +13,10 @@ using CodexSlotPing.Runner;
 
 namespace CodexSlotPing.IntegrationTests.Runner;
 
+[CollectionDefinition("TestNow CLI integration", DisableParallelization = true)]
+public sealed class TestNowCliIntegrationCollection { }
+
+[Collection("TestNow CLI integration")]
 public sealed class RunnerOrchestratorTests
 {
     private const string EasternTimeZoneId = "Eastern Standard Time";
@@ -410,6 +414,48 @@ public sealed class RunnerOrchestratorTests
         Assert.Equal(1, fixture.Launcher.CallCount);
     }
 
+    [Theory]
+    [InlineData("__FAKECODEX_SUCCESS__", CodexResultClassification.CONFIRMED_SUCCESS, null, true, false)]
+    [InlineData("__FAKECODEX_NONZERO__", CodexResultClassification.ATTEMPTED_UNCONFIRMED, "nonzero-exit", false, false)]
+    [InlineData("__FAKECODEX_QUOTA__", CodexResultClassification.ATTEMPTED_UNCONFIRMED, "usage-limit", false, true)]
+    public async Task TestNowFakeCliOutcomes_ArePersistedAsMatchingObservations(
+        string prompt,
+        CodexResultClassification expectedClassification,
+        string? expectedDiagnostic,
+        bool expectSuccess,
+        bool expectUsageLimit)
+    {
+        using var isolatedAppData = new IsolatedLocalAppData();
+        var fixture = CreateFixture(
+            AtLocal(TestDate, new TimeOnly(7, 1)),
+            config: AppConfigDefaults.Create() with { TimeZone = EasternTimeZoneId, Prompt = prompt });
+        var launcher = new CodexProcessLauncher(
+            new CodexInvocationBuilder(),
+            timeout: TimeSpan.FromSeconds(5));
+        var service = new TestRunService(
+            fixture.Clock,
+            fixture.TimeZoneProvider,
+            fixture.ClaimService,
+            fixture.EnvironmentDetector,
+            launcher,
+            fixture.LogWriter);
+
+        var response = await service.RunAsync("test-now-fake-cli", true, CancellationToken.None);
+        var observations = fixture.StateStore.State.Eligibility!.Observations;
+
+        Assert.Equal(expectedClassification, response.Result!.Invocation.Classification);
+        Assert.Equal(expectedDiagnostic, response.Result.Invocation.DiagnosticCategory);
+        Assert.Contains(observations, item => item.Kind == EligibilityObservationKind.AttemptStarted &&
+                                            item.Source == ObservationSource.AppTestNow);
+        Assert.Equal(expectSuccess, observations.Any(item =>
+            item.Kind == EligibilityObservationKind.ConfirmedSuccess && item.Source == ObservationSource.AppTestNow));
+        Assert.Equal(expectUsageLimit, observations.Any(item =>
+            item.Kind == EligibilityObservationKind.UsageLimitReached && item.Source == ObservationSource.AppTestNow));
+        Assert.Equal(expectedDiagnostic ?? expectedClassification.ToString(),
+            fixture.StateStore.State.LastTest!.ResultCategory);
+        Assert.Null(fixture.StateStore.State.ActiveTestNowClaim);
+    }
+
     [Fact]
     public void RunnerArguments_ParseOwnedTaskPath()
     {
@@ -732,6 +778,23 @@ public sealed class RunnerOrchestratorTests
         {
             Entries.Add(entry);
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class IsolatedLocalAppData : IDisposable
+    {
+        private readonly string? _previous = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        private readonly string _root = Path.Combine(Path.GetTempPath(), $"CodexSlotPing-TestNowCli-{Guid.NewGuid():N}");
+
+        public IsolatedLocalAppData() => Environment.SetEnvironmentVariable("LOCALAPPDATA", _root);
+
+        public void Dispose()
+        {
+            Environment.SetEnvironmentVariable("LOCALAPPDATA", _previous);
+            if (Directory.Exists(_root))
+            {
+                Directory.Delete(_root, recursive: true);
+            }
         }
     }
 }
