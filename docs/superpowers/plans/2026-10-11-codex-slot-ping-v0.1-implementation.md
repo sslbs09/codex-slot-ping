@@ -1,8 +1,10 @@
 # Codex Slot Ping v0.1 Implementation Plan
 
+> **Historical implementation plan.** This plan predates Eligibility Core and the dynamic one-shot Scheduler. Its fixed-slot tasks and trigger details describe the original baseline only and are retained as historical context. The current implementation is documented in [README](../../../README.md), [Architecture](../../architecture.md), and [Current Status](../../current-status.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the frozen v0.1 Windows x64 portable tray utility that runs one Codex CLI prompt at each of four strict daily slots with durable at-most-once dispatch.
+**Original goal (historical):** Build the initial v0.1 Windows x64 portable tray utility around four strict daily slots with durable at-most-once dispatch. This plan is superseded for current behavior by the dynamic Scheduler implementation.
 
 **Architecture:** Keep exactly three product projects: WPF App, platform-neutral Core, and a short-lived Runner started directly by Task Scheduler. Core owns shared rules and I/O; App owns presentation and user actions; Runner is the only formal-slot dispatcher. Inject only the clock, time zone, storage, mutex, process launcher, environment detector, and scheduler gateway needed by tests.
 

@@ -1,67 +1,41 @@
 # Codex Slot Ping
 
-Windows 托盘工具，可在明确配置的时间通过官方 Codex CLI 发起极小的真实请求，并管理计划任务、执行状态、日志和 fail-closed 控制。真实请求可能计入 Codex 使用额度。
+Windows 托盘工具，通过已安装并登录的官方 Codex CLI 发起计划中的真实请求。请求可能计入 Codex 使用额度。
 
-A small Windows tray utility for scheduled Codex CLI requests.
+## v0.1 当前行为
 
-The project is in early development, with no public release yet.
+- Core eligibility 根据本地状态和调度策略计算**下次计划尝试**（Next planned attempt）。这表示本地计划时间，不表示 Codex 额度恢复时间。
+- Core 将 decision 转成 SchedulePlan；Windows Task Scheduler 只在计划时间唤醒 Runner，不负责授权请求。
+- Runner 启动后检查任务状态，并通过共享 claim/mutex 重新执行 eligibility 检查。只有 claim 成功才会调用官方 Codex CLI。
+- 旧固定 slots 只为诊断和迁移保留，不再生成 Scheduler trigger。
+- Test Now 使用共享 eligibility 和 claim。遇到没有可信 reset 时间的已观察 usage limit 时，需要用户明确确认一次尝试；确认不会解除自动调度阻断。
 
-## 当前状态
+界面文案使用“下次计划尝试 / Next planned attempt”，不表示“额度恢复时间 / quota reset time”。计划依据本地调度策略计算，无法观察此应用之外的 Codex 使用。
 
-**Early development / pre-release。** 当前版本仍是固定四个本地时间 slot 的 baseline，尚未完成动态调度和最终验收。
+## 架构
 
-已完成：
+Eligibility Core → SchedulePlan → Windows Task Scheduler → Runner → Claim/Evaluation → Codex CLI
 
-- WPF desktop shell、托盘和 single-instance
-- 本地 Settings 与 Test Now 确认门
-- Windows Task Scheduler baseline
-- 结构化执行状态
-- 简体中文界面和 English fallback
+Scheduler 只负责唤醒 Runner；Scheduler trigger 本身不是执行许可。详情见[架构说明](docs/architecture.md)。
 
-未完成：
+## v0.1 限制
 
-- Scheduling Semantics v2
-- 动态 usage-window 调度
-- weekly quota 处理和手动 Codex 使用观察
-- 最终人工验收与真实请求 E2E
+v0.1 不会：
 
-## 当前工作方式
+- 观察此应用之外的 Codex 使用
+- 访问私有 API
+- 预测额度 reset 时间
+- 判断 weekly quota 是否耗尽
 
-当前 baseline 使用四个明确的本地时间：07:00、12:01、17:01、22:01。每个 slot 独立判断 eligibility；错过的 slot 不补跑。Test Now 会先显示确认门。固定四 slot 只是当前实现，后续计划改为动态调度。
+如果观察到 usage limit 且没有可信 reset 时间，自动调度保持阻断，不安排下一次自动 trigger。
 
-## 安全边界
+## 验证记录
 
-- 不绕过 Codex 服务端限制，也不修改 Codex 配额。
-- 不调用私有 API；真实请求由官方 Codex CLI 发出。
-- 真实请求可能计入 Codex 使用额度。
-- eligibility 或运行状态无法确认时，按 fail-closed 处理。
-- Scheduler 由用户明确启用、停用或移除。
-
-## 技术结构
-
-- `CodexSlotPing.App`：WPF 界面、设置、托盘和计划任务管理。
-- `CodexSlotPing.Core`：配置、slot eligibility、状态和可测试的 domain logic。
-- `CodexSlotPing.Runner`：由 Windows Task Scheduler 启动，执行真实 Codex 请求。
-
-## Development
-
-Windows、WPF、.NET 10，依赖已安装并登录的官方 Codex CLI。当前项目测试结果：Core 105/105，Integration 57/57，共 162 项通过；self-contained win-x64 Release publish 已通过。
+Release candidate 的既有自动化测试记录：Core 152/152、Integration 78/78、总计 230/230 PASS。该结果来自先前验证；本次文档同步没有重新运行测试。self-contained win-x64 Release publish 也有先前的 PASS 记录。
 
 ## 文档
 
-- [架构说明](docs/architecture.md)
 - [当前状态](docs/current-status.md)
-- [Scheduling Semantics v2 设计意图](docs/scheduling-v2.md)
-
-## Roadmap
-
-- Scheduling Semantics v2
-- 动态 5h usage-window
-- 手动使用导致的窗口漂移处理
-- weekly quota exhaustion 处理
-- 最终人工验收与 live E2E
-- packaging / release
-
-## Status
-
-尚无公开版本，也没有发布 GitHub Release。
+- [架构说明](docs/architecture.md)
+- [Scheduling Semantics v2](docs/scheduling-v2.md)
+- [原始 v0.1 设计快照](docs/superpowers/specs/2026-10-11-codex-slot-ping-v0.1-design.md)：历史资料，不代表当前调度行为。
