@@ -41,7 +41,8 @@ public sealed class RunnerOrchestrator
         ITaskSchedulerGateway taskSchedulerGateway,
         ICodexEnvironmentDetector environmentDetector,
         ICodexProcessLauncher processLauncher,
-        IStructuredLogWriter structuredLogWriter)
+        IStructuredLogWriter structuredLogWriter,
+        FormalSlotClaimService? claimService = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         ArgumentException.ThrowIfNullOrWhiteSpace(currentRunnerPath);
@@ -55,7 +56,7 @@ public sealed class RunnerOrchestrator
         _environmentDetector = environmentDetector ?? throw new ArgumentNullException(nameof(environmentDetector));
         _processLauncher = processLauncher ?? throw new ArgumentNullException(nameof(processLauncher));
         _structuredLogWriter = structuredLogWriter ?? throw new ArgumentNullException(nameof(structuredLogWriter));
-        _claimService = new FormalSlotClaimService(
+        _claimService = claimService ?? new FormalSlotClaimService(
             _clock,
             _timeZoneProvider,
             _configStore,
@@ -415,7 +416,8 @@ public sealed class RunnerOrchestrator
                         .OrderBy(observation => observation.ObservedAtUtc)
                         .ThenBy(observation => observation.Kind)
                         .ToArray(),
-                    HasUnresolvedClaim = records.Any(record => record.Status == FormalSlotStatus.CLAIMED)
+                    HasUnresolvedClaim = records.Any(record => record.Status == FormalSlotStatus.CLAIMED) ||
+                                         state.ActiveTestNowClaim is not null
                 };
                 _stateStore.SaveAsync(state with
                 {

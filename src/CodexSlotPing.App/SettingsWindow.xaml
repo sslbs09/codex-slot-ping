@@ -74,6 +74,9 @@
             <TextBlock Text="{loc:Loc Settings.RawLogsExplanation}"
                        FontSize="11" Foreground="#7A817B" TextWrapping="Wrap" Margin="21,3,0,0" />
 
+            <TextBlock Text="{loc:Loc Main.EligibilityTitle}" Style="{StaticResource FieldLabel}" Margin="0,15,0,4" />
+            <TextBlock x:Name="EligibilityDetailsText" Text="—" TextWrapping="Wrap" Foreground="#424A44" />
+
             <TextBlock x:Name="StatusText" Text="" Foreground="#8A4C24" TextWrapping="Wrap" Margin="0,14,0,8" />
             <WrapPanel>
                 <Button Content="{loc:Loc Settings.Save}" Style="{StaticResource ActionButton}" Click="Save_Click" />

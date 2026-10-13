@@ -3,6 +3,7 @@ using System.IO;
 using CodexSlotPing.Core.Codex;
 using CodexSlotPing.Core.Concurrency;
 using CodexSlotPing.Core.Configuration;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Logging;
 using CodexSlotPing.Core.Persistence;
 using CodexSlotPing.Core.Scheduler;
@@ -22,6 +23,7 @@ public sealed record AppScreenState(
     SchedulerStatus Scheduler,
     SlotScheduleEntry? NextSlot,
     IReadOnlyList<TodaySlotState> TodaySlots,
+    EligibilityDecision EligibilityDecision,
     DateTimeOffset NowUtc,
     string CurrentWindowsTimeZoneId,
     string LogsDirectory)
@@ -43,10 +45,11 @@ public sealed class AppController
     private readonly ITimeZoneProvider _timeZoneProvider;
     private readonly IConfigStore _configStore;
     private readonly IStateStore _stateStore;
+    private readonly FormalSlotClaimService _claimService;
     private readonly ITaskSchedulerGateway _schedulerGateway;
     private readonly ICodexEnvironmentDetector _environmentDetector;
     private readonly string _runnerPath;
-    private readonly Func<AppConfig, CancellationToken, Task<TestRunResult>> _runTestNow;
+    private readonly Func<string, CancellationToken, Task<TestNowRunResponse>> _runTestNow;
     private readonly string _logsDirectory;
     private readonly NextSlotCalculator _nextSlotCalculator;
     private readonly SchedulerHealthEvaluator _schedulerHealthEvaluator = new();
@@ -58,16 +61,18 @@ public sealed class AppController
         ITimeZoneProvider timeZoneProvider,
         IConfigStore configStore,
         IStateStore stateStore,
+        FormalSlotClaimService claimService,
         ITaskSchedulerGateway schedulerGateway,
         ICodexEnvironmentDetector environmentDetector,
         string runnerPath,
-        Func<AppConfig, CancellationToken, Task<TestRunResult>> runTestNow,
+        Func<string, CancellationToken, Task<TestNowRunResponse>> runTestNow,
         string logsDirectory)
     {
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _timeZoneProvider = timeZoneProvider ?? throw new ArgumentNullException(nameof(timeZoneProvider));
         _configStore = configStore ?? throw new ArgumentNullException(nameof(configStore));
         _stateStore = stateStore ?? throw new ArgumentNullException(nameof(stateStore));
+        _claimService = claimService ?? throw new ArgumentNullException(nameof(claimService));
         _schedulerGateway = schedulerGateway ?? throw new ArgumentNullException(nameof(schedulerGateway));
         _environmentDetector = environmentDetector ?? throw new ArgumentNullException(nameof(environmentDetector));
         ArgumentException.ThrowIfNullOrWhiteSpace(runnerPath);
@@ -89,26 +94,27 @@ public sealed class AppController
         var stateStore = new JsonStateStore(atomicFile, paths.StatePath);
         var stateMutex = new NamedStateMutex();
         var environmentDetector = new CodexEnvironmentDetector(new CodexExecutableResolver());
-        var rawLogStore = new RawLogStore(Path.Combine(paths.LogsDirectory, "raw"), clock);
-        var processLauncher = new CodexProcessLauncher(new CodexInvocationBuilder(), rawLogStore: rawLogStore);
-        var testRunService = new TestRunService(
+        var claimService = new FormalSlotClaimService(
             clock,
             timeZoneProvider,
+            configStore,
             stateStore,
             stateMutex,
-            environmentDetector,
-            processLauncher,
-            new StructuredLogWriter(paths.LogsDirectory));
+            new SlotAdmissionEvaluator(timeZoneProvider),
+            new EligibilityEvaluator());
+        var runnerPath = RunnerPathResolver.Resolve(appBaseDirectory ?? AppContext.BaseDirectory);
+        var testNowRunner = new RunnerProcessClient(runnerPath);
 
         return new AppController(
             clock,
             timeZoneProvider,
             configStore,
             stateStore,
+            claimService,
             new WindowsTaskSchedulerGateway(),
             environmentDetector,
-            RunnerPathResolver.Resolve(appBaseDirectory ?? AppContext.BaseDirectory),
-            testRunService.RunAsync,
+            runnerPath,
+            testNowRunner.RunAsync,
             paths.LogsDirectory);
     }
 
@@ -119,6 +125,8 @@ public sealed class AppController
         var persistentState = await _stateStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         var currentTimeZoneId = _timeZoneProvider.CurrentWindowsTimeZoneId;
         var now = _clock.UtcNow.ToUniversalTime();
+        var eligibilityDecision = await _claimService.GetEligibilityDecisionAsync(
+            EligibilityRequest.Scheduled(now), cancellationToken).ConfigureAwait(false);
         var environment = await _environmentDetector.DetectAsync(cancellationToken).ConfigureAwait(false);
         var rawScheduler = await _schedulerGateway.ReadStatusAsync(
             SchedulerTaskContract.ProductionTaskPath,
@@ -131,6 +139,7 @@ public sealed class AppController
         var todaySlots = BuildTodaySlots(config, persistentState, now, currentTimeZoneId);
 
         return new AppScreenState(config, persistentState, environment, scheduler, nextSlot, todaySlots,
+            eligibilityDecision,
             now, currentTimeZoneId, _logsDirectory);
     }
 
@@ -321,7 +330,11 @@ public sealed class AppController
         return await SaveSettingsAsync(config with { WakeToRun = wakeToRun }, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<TestRunResult?> RunTestNowAsync(bool userConfirmed, CancellationToken cancellationToken)
+    public Task<EligibilityDecision> GetTestNowEligibilityDecisionAsync(CancellationToken cancellationToken) =>
+        _claimService.GetEligibilityDecisionAsync(
+            EligibilityRequest.TestNow(_clock.UtcNow.ToUniversalTime()), cancellationToken);
+
+    public async Task<TestNowRunResponse?> RunTestNowAsync(bool userConfirmed, CancellationToken cancellationToken)
     {
         if (!userConfirmed)
         {
@@ -335,16 +348,7 @@ public sealed class AppController
 
         try
         {
-            var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
-            var environment = await _environmentDetector.DetectAsync(cancellationToken).ConfigureAwait(false);
-            var validation = ConfigValidator.Validate(config, _timeZoneProvider.CurrentWindowsTimeZoneId,
-                environment.SupportedReasoningEfforts);
-            if (!validation.IsValid || validation.NormalizedConfig is null)
-            {
-                throw new InvalidOperationException(string.Join(Environment.NewLine, validation.Errors));
-            }
-
-            return await _runTestNow(validation.NormalizedConfig, cancellationToken).ConfigureAwait(false);
+            return await _runTestNow(Guid.NewGuid().ToString("N"), cancellationToken).ConfigureAwait(false);
         }
         finally
         {

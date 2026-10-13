@@ -76,6 +76,14 @@ public sealed class JsonStateStore : IStateStore
             throw new InvalidDataException("The state document contains an invalid Test Now record.");
         }
 
+        if (state.ActiveTestNowClaim is { } activeTestNowClaim &&
+            (string.IsNullOrWhiteSpace(activeTestNowClaim.TestId) ||
+             activeTestNowClaim.ClaimedAtUtc.Offset != TimeSpan.Zero ||
+             string.Equals(activeTestNowClaim.TestId, state.LastTest?.TestId, StringComparison.Ordinal)))
+        {
+            throw new InvalidDataException("The state document contains an invalid active Test Now claim.");
+        }
+
         if (state.SchemaVersion == StateDocument.CurrentSchemaVersion)
         {
             EnsureEligibilityIsValid(state);
@@ -110,7 +118,8 @@ public sealed class JsonStateStore : IStateStore
             throw new InvalidDataException("The state document contains inconsistent highestObservedUtc values.");
         }
 
-        var hasUnresolvedClaim = state.FormalSlots.Any(record => record.Status == FormalSlotStatus.CLAIMED);
+        var hasUnresolvedClaim = state.FormalSlots.Any(record => record.Status == FormalSlotStatus.CLAIMED) ||
+                                 state.ActiveTestNowClaim is not null;
         if (eligibility.HasUnresolvedClaim != hasUnresolvedClaim)
         {
             throw new InvalidDataException("The state document contains an inconsistent unresolved claim marker.");

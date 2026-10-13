@@ -226,7 +226,7 @@ public sealed class AtomicJsonFileTests
     }
 
     [Fact]
-    public async Task StateStore_RoundTripsFormalSlotAndTestMetadataWithoutPromptFields()
+    public async Task StateStore_RoundTripsFormalSlotTestMetadataAndActiveTestNowClaimWithoutPromptFields()
     {
         using var directory = new TemporaryDirectory();
         var path = Path.Combine(directory.Path, "state.json");
@@ -241,13 +241,15 @@ public sealed class AtomicJsonFileTests
                 FormalSlotStatus.CONFIRMED_SUCCESS,
                 completedAtUtc,
                 null)],
-            LastTest = new TestRunRecord("test-id", completedAtUtc, "gpt-5.6-luna", "low", "CONFIRMED_SUCCESS", 1234, 0),
+            LastTest = new TestRunRecord("prior-test-id", completedAtUtc, "gpt-5.6-luna", "low", "CONFIRMED_SUCCESS", 1234, 0),
+            ActiveTestNowClaim = new TestNowClaimRecord("active-test-id", completedAtUtc),
             Eligibility = EligibilityState.Empty() with
             {
                 HighestObservedUtc = completedAtUtc,
                 ExternalManualUsageUnknown = false,
                 LastAttemptAtUtc = completedAtUtc,
                 LastConfirmedSuccessAtUtc = completedAtUtc,
+                HasUnresolvedClaim = true,
                 Observations = [new EligibilityObservation(
                     EligibilityObservationKind.ConfirmedSuccess,
                     completedAtUtc,
@@ -263,6 +265,7 @@ public sealed class AtomicJsonFileTests
         Assert.Equal(state.HighestObservedUtc, loaded.HighestObservedUtc);
         Assert.Equal(state.FormalSlots, loaded.FormalSlots);
         Assert.Equal(state.LastTest, loaded.LastTest);
+        Assert.Equal(state.ActiveTestNowClaim, loaded.ActiveTestNowClaim);
         Assert.Equal(state.Eligibility!.SchemaVersion, loaded.Eligibility!.SchemaVersion);
         Assert.Equal(state.Eligibility.HighestObservedUtc, loaded.Eligibility.HighestObservedUtc);
         Assert.Equal(state.Eligibility.LastAttemptAtUtc, loaded.Eligibility.LastAttemptAtUtc);

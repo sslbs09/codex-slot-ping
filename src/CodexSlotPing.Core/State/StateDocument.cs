@@ -8,7 +8,8 @@ public sealed record StateDocument(
     [property: JsonRequired] DateTimeOffset? HighestObservedUtc,
     [property: JsonRequired] IReadOnlyList<FormalSlotRecord> FormalSlots,
     [property: JsonRequired] TestRunRecord? LastTest,
-    EligibilityState? Eligibility = null)
+    EligibilityState? Eligibility = null,
+    TestNowClaimRecord? ActiveTestNowClaim = null)
 {
     public const int CurrentSchemaVersion = 2;
 

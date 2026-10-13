@@ -56,6 +56,7 @@ public partial class SettingsWindow : Window
             AddTimeZoneOption(config.TimeZone);
         }
         TimeZoneCombo.SelectedValue = config.TimeZone;
+        EligibilityDetailsText.Text = EligibilityDecisionProjection.FormatDetails(_screenState.EligibilityDecision);
 
         TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
             ? Visibility.Visible
@@ -141,6 +142,7 @@ public partial class SettingsWindow : Window
                 ? UiText.Get(successMessageKey)
                 : UiText.FormatDiagnostic(result.DiagnosticCategory ?? UiText.Get("Settings.OperationFailed"));
             _screenState = await _controller.RefreshAsync(CancellationToken.None);
+            EligibilityDetailsText.Text = EligibilityDecisionProjection.FormatDetails(_screenState.EligibilityDecision);
             TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
                 ? Visibility.Visible
                 : Visibility.Collapsed;

@@ -36,6 +36,9 @@
   <data name="Main.TestNowAlreadyRunning" xml:space="preserve"><value>已有一个立即测试请求正在运行。</value></data>
   <data name="Main.TestNowConfirmTitle" xml:space="preserve"><value>确认立即测试</value></data>
   <data name="Main.TestNowConfirmBody" xml:space="preserve"><value>这会将当前配置的提示词作为真实请求发送给 Codex，并可能计入使用额度。是否继续？</value></data>
+  <data name="Main.TestNowConfirmWithDecision" xml:space="preserve"><value>{0}{1}资格状态：{2}{1}原因：{3}{1}可信度：{4}{1}下次可尝试：{5}{1}{1}确认执行一次立即测试？</value></data>
+  <data name="Main.EligibilityTitle" xml:space="preserve"><value>请求资格</value></data>
+  <data name="Main.EligibilityDetails" xml:space="preserve"><value>状态：{0}{1}原因：{2}{1}可信度：{3}{1}下次可尝试：{4}</value></data>
   <data name="Main.TestNowResultTitle" xml:space="preserve"><value>立即测试结果</value></data>
   <data name="Main.TestNowFailedTitle" xml:space="preserve"><value>立即测试失败</value></data>
   <data name="Main.LogsOpenFailed" xml:space="preserve"><value>无法打开日志：{0}</value></data>
@@ -165,4 +168,25 @@
   <data name="Exit.Explanation" xml:space="preserve"><value>计划任务独立于此窗口运行。退出只会关闭应用。</value></data>
   <data name="Exit.ExitApp" xml:space="preserve"><value>退出应用</value></data>
   <data name="Exit.Cancel" xml:space="preserve"><value>取消</value></data>
+  <data name="Eligibility.None" xml:space="preserve"><value>—</value></data>
+  <data name="Eligibility.Status.Eligible" xml:space="preserve"><value>可尝试</value></data>
+  <data name="Eligibility.Status.NotYetEligible" xml:space="preserve"><value>尚未到可尝试时间</value></data>
+  <data name="Eligibility.Status.Blocked" xml:space="preserve"><value>已阻止</value></data>
+  <data name="Eligibility.Status.Unknown" xml:space="preserve"><value>未知</value></data>
+  <data name="Eligibility.Status.ConfirmationRequired" xml:space="preserve"><value>需要确认</value></data>
+  <data name="Eligibility.Confidence.Unknown" xml:space="preserve"><value>未知</value></data>
+  <data name="Eligibility.Confidence.Low" xml:space="preserve"><value>低</value></data>
+  <data name="Eligibility.Confidence.Medium" xml:space="preserve"><value>中</value></data>
+  <data name="Eligibility.Confidence.High" xml:space="preserve"><value>高</value></data>
+  <data name="Eligibility.Reason.Ready" xml:space="preserve"><value>当前可尝试</value></data>
+  <data name="Eligibility.Reason.ExternalManualUsageUnknown" xml:space="preserve"><value>外部 Codex 使用情况未知</value></data>
+  <data name="Eligibility.Reason.UsageLimitWithoutTrustedReset" xml:space="preserve"><value>已观察到使用额度限制，但没有可信的重置时间</value></data>
+  <data name="Eligibility.Reason.WaitingForTrustedReset" xml:space="preserve"><value>等待已观察到的可信重置时间</value></data>
+  <data name="Eligibility.Reason.TestNowConfirmationRequired" xml:space="preserve"><value>需要确认一次真实的立即测试请求</value></data>
+  <data name="Eligibility.Reason.TestNowExplicitlyConfirmed" xml:space="preserve"><value>已明确确认手动立即测试</value></data>
+  <data name="Eligibility.Reason.ClockRollback" xml:space="preserve"><value>系统时间早于已记录的 UTC 高水位</value></data>
+  <data name="Eligibility.Reason.UnresolvedClaim" xml:space="preserve"><value>另一个请求 claim 尚未完成</value></data>
+  <data name="Eligibility.Reason.UnsupportedStateSchema" xml:space="preserve"><value>状态文件版本不受支持</value></data>
+  <data name="Eligibility.Reason.InvalidRequest" xml:space="preserve"><value>Eligibility 请求无效</value></data>
+  <data name="Eligibility.Reason.InvalidState" xml:space="preserve"><value>Eligibility 状态无效</value></data>
 </root>

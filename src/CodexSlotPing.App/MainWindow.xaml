@@ -94,6 +94,10 @@
             </ItemsControl>
 
             <Border Height="1" Background="#D8DAD4" Margin="0,14,0,12" />
+            <TextBlock Text="{loc:Loc Main.EligibilityTitle}" Style="{StaticResource SectionLabel}" />
+            <TextBlock x:Name="EligibilityDetailsText" Text="—" TextWrapping="Wrap" Foreground="#424A44" Margin="0,6,0,0" />
+
+            <Border Height="1" Background="#D8DAD4" Margin="0,14,0,12" />
 
             <Button Style="{StaticResource ShortcutRow}" Click="OpenSettingsShortcut_Click" ToolTip="{loc:Loc Main.OpenSettingHint}">
                 <Grid>

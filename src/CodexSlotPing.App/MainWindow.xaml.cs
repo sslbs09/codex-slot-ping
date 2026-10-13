@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using CodexSlotPing.Core.Codex;
 using CodexSlotPing.Core.Configuration;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Scheduler;
 using CodexSlotPing.Core.Slots;
 using CodexSlotPing.Core.State;
@@ -106,6 +107,7 @@ public partial class MainWindow : Window
         TodayRows.ItemsSource = state.TodaySlots.Select(slot => new TodayRow(
             slot.LocalTime.ToString("HH:mm"),
             FormatSlotStatus(slot.Status))).ToArray();
+        EligibilityDetailsText.Text = EligibilityDecisionProjection.FormatDetails(state.EligibilityDecision);
         ModelText.Text = state.Config.Model;
         ReasoningText.Text = UiText.FormatReasoningEffort(state.Config.ReasoningEffort);
         SchedulerText.Text = FormatScheduler(state.Scheduler);
@@ -160,8 +162,33 @@ public partial class MainWindow : Window
 
         ShowFromTray();
 
+        EligibilityDecision testNowDecision;
+        try
+        {
+            testNowDecision = await _controller.GetTestNowEligibilityDecisionAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            WpfMessageBox.Show(UiText.Format("Main.StatusRefreshFailed", exception.Message),
+                UiText.Get("Main.TestNowFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        if (!testNowDecision.RequiresConfirmation)
+        {
+            WpfMessageBox.Show(
+                EligibilityDecisionProjection.FormatDetails(testNowDecision),
+                UiText.Get("Main.TestNowResultTitle"),
+                MessageBoxButton.OK,
+                testNowDecision.Status == EligibilityStatus.Eligible
+                    ? MessageBoxImage.Information
+                    : MessageBoxImage.Warning);
+            await RefreshAsync();
+            return;
+        }
+
         var answer = WpfMessageBox.Show(
-            UiText.Get("Main.TestNowConfirmBody"),
+            EligibilityDecisionProjection.FormatTestNowConfirmation(testNowDecision),
             UiText.Get("Main.TestNowConfirmTitle"),
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
@@ -177,13 +204,18 @@ public partial class MainWindow : Window
         StatusMessageText.Text = UiText.Get("Main.TestNowRunning");
         try
         {
-            var result = await _controller.RunTestNowAsync(true, CancellationToken.None);
-            if (result is not null)
+            var response = await _controller.RunTestNowAsync(true, CancellationToken.None);
+            if (response?.Result is { } result)
             {
                 WpfMessageBox.Show(FormatTestResult(result), UiText.Get("Main.TestNowResultTitle"), MessageBoxButton.OK,
                     result.Invocation.Classification == CodexResultClassification.CONFIRMED_SUCCESS
                         ? MessageBoxImage.Information
                         : MessageBoxImage.Warning);
+            }
+            else if (response is not null)
+            {
+                WpfMessageBox.Show(EligibilityDecisionProjection.FormatDetails(response.Decision),
+                    UiText.Get("Main.TestNowResultTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             else
             {

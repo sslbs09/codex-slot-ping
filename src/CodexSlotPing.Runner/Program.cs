@@ -1,10 +1,14 @@
+using System.Text.Json;
 using CodexSlotPing.Core.Codex;
 using CodexSlotPing.Core.Concurrency;
 using CodexSlotPing.Core.Configuration;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Logging;
 using CodexSlotPing.Core.Persistence;
 using CodexSlotPing.Core.Scheduler;
+using CodexSlotPing.Core.Slots;
 using CodexSlotPing.Core.State;
+using CodexSlotPing.Core.Testing;
 using CodexSlotPing.Core.Time;
 
 namespace CodexSlotPing.Runner;
@@ -49,6 +53,46 @@ internal static class Program
                 new CodexInvocationBuilder(),
                 rawLogStore: new RawLogStore(paths.LogsDirectory, clock));
             var logWriter = new StructuredLogWriter(paths.LogsDirectory);
+            var claimService = new FormalSlotClaimService(
+                clock,
+                timeZoneProvider,
+                configStore,
+                stateStore,
+                mutex,
+                new SlotAdmissionEvaluator(timeZoneProvider),
+                new EligibilityEvaluator());
+
+            if (options.Mode == RunnerMode.TestNow)
+            {
+                if (string.IsNullOrWhiteSpace(options.TestId))
+                {
+                    return (int)RunnerExitCode.InvalidArguments;
+                }
+
+                var testRunService = new TestRunService(
+                    clock,
+                    timeZoneProvider,
+                    claimService,
+                    environmentDetector,
+                    launcher,
+                    logWriter);
+                var response = await testRunService.RunAsync(
+                    options.TestId,
+                    options.TestNowConfirmed,
+                    CancellationToken.None).ConfigureAwait(false);
+                Console.Out.WriteLine(JsonSerializer.Serialize(
+                    response,
+                    new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+                return response.Result?.Invocation.Classification switch
+                {
+                    CodexResultClassification.CONFIRMED_SUCCESS => (int)RunnerExitCode.ConfirmedSuccess,
+                    CodexResultClassification.PRELAUNCH_FAILED => (int)RunnerExitCode.PrelaunchFailed,
+                    CodexResultClassification.ATTEMPTED_UNCONFIRMED => (int)RunnerExitCode.AttemptedUnconfirmed,
+                    null => (int)RunnerExitCode.NoDispatch,
+                    _ => (int)RunnerExitCode.UnexpectedFailure
+                };
+            }
+
             var orchestrator = new RunnerOrchestrator(
                 options,
                 runnerPath,
@@ -60,7 +104,8 @@ internal static class Program
                 schedulerGateway,
                 environmentDetector,
                 launcher,
-                logWriter);
+                logWriter,
+                claimService);
 
             return (int)await orchestrator.RunFormalSlotAsync(CancellationToken.None).ConfigureAwait(false);
         }

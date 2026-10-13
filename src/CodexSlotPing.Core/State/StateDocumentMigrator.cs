@@ -66,7 +66,8 @@ public static class StateDocumentMigrator
                 .OrderBy(observation => observation.ObservedAtUtc)
                 .ThenBy(observation => observation.Kind)
                 .ToArray(),
-            HasUnresolvedClaim: state.FormalSlots.Any(record => record.Status == FormalSlotStatus.CLAIMED));
+            HasUnresolvedClaim: state.FormalSlots.Any(record => record.Status == FormalSlotStatus.CLAIMED) ||
+                                state.ActiveTestNowClaim is not null);
 
         return state with
         {

@@ -1,5 +1,6 @@
 using System.Globalization;
 using CodexSlotPing.App;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Scheduler;
 using CodexSlotPing.Core.Slots;
 
@@ -64,6 +65,43 @@ public sealed class UiTextTests
         Assert.Equal(
             "这会将当前配置的提示词作为真实请求发送给 Codex，并可能计入使用额度。是否继续？",
             UiText.Get("Main.TestNowConfirmBody", Chinese));
+    }
+
+    [Fact]
+    public void EligibilityDecisionProjection_LocalizesCoreReasonAndConfidence()
+    {
+        var decision = new EligibilityDecision(
+            EligibilityDecision.CurrentSchemaVersion,
+            EligibilityIntent.Scheduled,
+            EligibilityStatus.Unknown,
+            EligibilityReason.ExternalManualUsageUnknown,
+            null,
+            Confidence.Unknown,
+            ObservationSource.Unknown,
+            false);
+
+        var display = EligibilityDecisionProjection.Create(decision, Chinese);
+        var details = EligibilityDecisionProjection.FormatDetails(decision, Chinese);
+        var confirmationDecision = new EligibilityDecision(
+            EligibilityDecision.CurrentSchemaVersion,
+            EligibilityIntent.TestNow,
+            EligibilityStatus.ConfirmationRequired,
+            EligibilityReason.TestNowConfirmationRequired,
+            null,
+            Confidence.Unknown,
+            ObservationSource.Unknown,
+            true);
+        var confirmation = EligibilityDecisionProjection.FormatTestNowConfirmation(confirmationDecision, Chinese);
+
+        Assert.Equal("未知", display.Status);
+        Assert.Equal("外部 Codex 使用情况未知", display.Reason);
+        Assert.Equal("未知", display.Confidence);
+        Assert.Null(display.NextEligibleAt);
+        Assert.Contains("外部 Codex 使用情况未知", details);
+        Assert.DoesNotContain(nameof(EligibilityReason.ExternalManualUsageUnknown), details);
+        Assert.Contains("状态：需要确认", confirmation);
+        Assert.Contains("原因：需要确认一次真实的立即测试请求", confirmation);
+        Assert.Contains("可信度：未知", confirmation);
     }
 
     [Fact]

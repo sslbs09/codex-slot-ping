@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CodexSlotPing.Core.Codex;
 using CodexSlotPing.Core.Concurrency;
 using CodexSlotPing.Core.Configuration;
 using CodexSlotPing.Core.Eligibility;
@@ -40,6 +41,257 @@ public sealed class FormalSlotClaimService
     {
         // A Windows Mutex is thread-affine. Keep acquisition, the short storage section, and release on one worker thread.
         return Task.Run(() => TryClaimCurrentSlot(cancellationToken), CancellationToken.None);
+    }
+
+    public Task<EligibilityDecision> GetEligibilityDecisionAsync(
+        EligibilityRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Task.Run(() => GetEligibilityDecision(request, cancellationToken), CancellationToken.None);
+    }
+
+    public Task<TestNowClaimResult> TryClaimTestNowAsync(
+        string testId,
+        bool userConfirmed,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(testId);
+        return Task.Run(() => TryClaimTestNow(testId, userConfirmed, cancellationToken), CancellationToken.None);
+    }
+
+    public Task<bool> FinalizeTestNowAsync(
+        string testId,
+        TestRunRecord record,
+        CodexInvocationResult invocation,
+        DateTimeOffset? attemptStartedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(testId);
+        ArgumentNullException.ThrowIfNull(record);
+        ArgumentNullException.ThrowIfNull(invocation);
+        return Task.Run(
+            () => FinalizeTestNow(testId, record, invocation, attemptStartedAtUtc, cancellationToken),
+            CancellationToken.None);
+    }
+
+    private EligibilityDecision GetEligibilityDecision(EligibilityRequest request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var lease = AcquireMutexOrThrow();
+        var state = StateDocumentMigrator.MigrateV1ToV2(
+            _stateStore.LoadAsync(cancellationToken).GetAwaiter().GetResult());
+        return _eligibilityEvaluator.Evaluate(state.Eligibility!, request);
+    }
+
+    private TestNowClaimResult TryClaimTestNow(
+        string testId,
+        bool userConfirmed,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        StateMutexLease? lease;
+        try
+        {
+            lease = _stateMutex.TryAcquire(MutexTimeout);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return new TestNowClaimResult(TestNowClaimKind.Blocked, testId, null, null);
+        }
+
+        if (lease is null)
+        {
+            return new TestNowClaimResult(TestNowClaimKind.Blocked, testId, null, null);
+        }
+
+        using (lease)
+        {
+            AppConfig config;
+            StateDocument loadedState;
+            StateDocument state;
+            try
+            {
+                config = _configStore.LoadOrCreateAsync(cancellationToken).GetAwaiter().GetResult();
+                loadedState = _stateStore.LoadAsync(cancellationToken).GetAwaiter().GetResult();
+                state = StateDocumentMigrator.MigrateV1ToV2(loadedState);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is InvalidDataException or IOException or JsonException or UnauthorizedAccessException)
+            {
+                return new TestNowClaimResult(TestNowClaimKind.Blocked, testId, null, null);
+            }
+
+            var nowUtc = _clock.UtcNow.ToUniversalTime();
+            var decision = _eligibilityEvaluator.Evaluate(
+                state.Eligibility! with { HighestObservedUtc = state.HighestObservedUtc },
+                userConfirmed
+                    ? EligibilityRequest.ConfirmedTestNow(nowUtc)
+                    : EligibilityRequest.TestNow(nowUtc));
+
+            if (string.Equals(state.ActiveTestNowClaim?.TestId, testId, StringComparison.Ordinal) ||
+                string.Equals(state.LastTest?.TestId, testId, StringComparison.Ordinal))
+            {
+                return new TestNowClaimResult(TestNowClaimKind.AlreadyConsumed, testId, null, decision);
+            }
+
+            if (decision.Status != EligibilityStatus.Eligible)
+            {
+                return new TestNowClaimResult(TestNowClaimKind.NotEligible, testId, null, decision);
+            }
+
+            var highestObservedUtc = Later(state.HighestObservedUtc, nowUtc);
+            var eligibility = state.Eligibility! with
+            {
+                HighestObservedUtc = highestObservedUtc,
+                HasUnresolvedClaim = true,
+                Observations = state.Eligibility.Observations
+                    .Append(new EligibilityObservation(
+                        EligibilityObservationKind.TestNowConfirmationGranted,
+                        nowUtc,
+                        ObservationSource.AppTestNow,
+                        Confidence.High))
+                    .ToArray()
+            };
+            var claimedState = state with
+            {
+                HighestObservedUtc = highestObservedUtc,
+                Eligibility = eligibility,
+                ActiveTestNowClaim = new TestNowClaimRecord(testId, nowUtc)
+            };
+
+            if (!TrySaveState(claimedState, cancellationToken))
+            {
+                return new TestNowClaimResult(TestNowClaimKind.Blocked, testId, null, decision);
+            }
+
+            return new TestNowClaimResult(TestNowClaimKind.Claimed, testId, config, decision);
+        }
+    }
+
+    private bool FinalizeTestNow(
+        string testId,
+        TestRunRecord record,
+        CodexInvocationResult invocation,
+        DateTimeOffset? attemptStartedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        StateMutexLease? lease;
+        try
+        {
+            lease = _stateMutex.TryAcquire(MutexTimeout);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return false;
+        }
+
+        if (lease is null)
+        {
+            return false;
+        }
+
+        using (lease)
+        {
+            try
+            {
+                var state = StateDocumentMigrator.MigrateV1ToV2(
+                    _stateStore.LoadAsync(cancellationToken).GetAwaiter().GetResult());
+                if (!string.Equals(state.ActiveTestNowClaim?.TestId, testId, StringComparison.Ordinal) ||
+                    !string.Equals(record.TestId, testId, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                var eligibility = state.Eligibility!;
+                var observations = eligibility.Observations.ToList();
+                var lastAttemptAtUtc = eligibility.LastAttemptAtUtc;
+                var lastConfirmedSuccessAtUtc = eligibility.LastConfirmedSuccessAtUtc;
+                if (invocation.ProcessStarted && attemptStartedAtUtc is { } requestStartedAtUtc)
+                {
+                    lastAttemptAtUtc = Later(lastAttemptAtUtc, requestStartedAtUtc);
+                    observations.Add(new EligibilityObservation(
+                        EligibilityObservationKind.AttemptStarted,
+                        requestStartedAtUtc.ToUniversalTime(),
+                        ObservationSource.AppTestNow,
+                        Confidence.High));
+                }
+
+                var completedAtUtc = record.CompletedAtUtc.ToUniversalTime();
+                if (invocation.ProcessStarted && invocation.Classification == CodexResultClassification.CONFIRMED_SUCCESS)
+                {
+                    lastConfirmedSuccessAtUtc = Later(lastConfirmedSuccessAtUtc, completedAtUtc);
+                    observations.Add(new EligibilityObservation(
+                        EligibilityObservationKind.ConfirmedSuccess,
+                        completedAtUtc,
+                        ObservationSource.AppTestNow,
+                        Confidence.High));
+                }
+
+                if (invocation.ProcessStarted &&
+                    string.Equals(invocation.DiagnosticCategory, "usage-limit", StringComparison.OrdinalIgnoreCase))
+                {
+                    observations.Add(new EligibilityObservation(
+                        EligibilityObservationKind.UsageLimitReached,
+                        completedAtUtc,
+                        ObservationSource.AppTestNow,
+                        Confidence.High));
+                }
+
+                var highestObservedUtc = Later(state.HighestObservedUtc, completedAtUtc);
+                if (attemptStartedAtUtc is { } observedAttemptAtUtc)
+                {
+                    highestObservedUtc = Later(highestObservedUtc, observedAttemptAtUtc);
+                }
+
+                var records = state.FormalSlots;
+                var finalizedEligibility = eligibility with
+                {
+                    HighestObservedUtc = highestObservedUtc,
+                    LastAttemptAtUtc = lastAttemptAtUtc,
+                    LastConfirmedSuccessAtUtc = lastConfirmedSuccessAtUtc,
+                    Observations = observations
+                        .OrderBy(observation => observation.ObservedAtUtc)
+                        .ThenBy(observation => observation.Kind)
+                        .ToArray(),
+                    HasUnresolvedClaim = records.Any(item => item.Status == FormalSlotStatus.CLAIMED)
+                };
+                var finalizedState = state with
+                {
+                    HighestObservedUtc = highestObservedUtc,
+                    LastTest = record with { CompletedAtUtc = completedAtUtc },
+                    Eligibility = finalizedEligibility,
+                    ActiveTestNowClaim = null
+                };
+                return TrySaveState(finalizedState, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is InvalidDataException or IOException or JsonException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+    }
+
+    private StateMutexLease AcquireMutexOrThrow()
+    {
+        StateMutexLease? lease;
+        try
+        {
+            lease = _stateMutex.TryAcquire(MutexTimeout);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new IOException("Could not acquire the state mutex.", exception);
+        }
+
+        return lease ?? throw new IOException("Could not acquire the state mutex.");
     }
 
     private SlotClaimResult TryClaimCurrentSlot(CancellationToken cancellationToken)
@@ -293,6 +545,14 @@ public sealed class FormalSlotClaimService
             HighestObservedUtc = highestObservedUtc,
             Eligibility = state.Eligibility! with { HighestObservedUtc = highestObservedUtc }
         };
+
+    private static DateTimeOffset Later(DateTimeOffset? current, DateTimeOffset candidate)
+    {
+        var utcCandidate = candidate.ToUniversalTime();
+        return current is { } value && value.ToUniversalTime() >= utcCandidate
+            ? value.ToUniversalTime()
+            : utcCandidate;
+    }
 
     private bool SaveStateIfChanged(StateDocument originalState, StateDocument updatedState, CancellationToken cancellationToken)
     {

@@ -2,6 +2,7 @@ using System.Text.Json;
 using CodexSlotPing.Core.Codex;
 using CodexSlotPing.Core.Concurrency;
 using CodexSlotPing.Core.Configuration;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Logging;
 using CodexSlotPing.Core.Slots;
 using CodexSlotPing.Core.State;
@@ -23,20 +24,27 @@ public sealed class TestRunServiceTests
         var before = fixture.StateStore.State;
         var beforeNextSlot = GetNextSlot(fixture, before);
 
-        var first = await fixture.Service.RunAsync(fixture.Config, CancellationToken.None);
-        var second = await fixture.Service.RunAsync(fixture.Config, CancellationToken.None);
+        var first = await fixture.Service.RunAsync("test-run-001", userConfirmed: true, CancellationToken.None);
+        var second = await fixture.Service.RunAsync("test-run-002", userConfirmed: true, CancellationToken.None);
 
-        Assert.NotEqual(first.TestId, second.TestId);
-        Assert.Equal(Now, first.CompletedAtUtc);
-        Assert.Equal(second.TestId, fixture.StateStore.State.LastTest!.TestId);
-        Assert.Equal(second.CompletedAtUtc, fixture.StateStore.State.LastTest.CompletedAtUtc);
-        Assert.Equal(before.HighestObservedUtc, fixture.StateStore.State.HighestObservedUtc);
+        Assert.NotNull(first.Result);
+        Assert.NotNull(second.Result);
+        Assert.Equal("test-run-001", first.Result!.TestId);
+        Assert.Equal("test-run-002", second.Result!.TestId);
+        Assert.Equal(Now, first.Result.CompletedAtUtc);
+        Assert.Equal(second.Result.TestId, fixture.StateStore.State.LastTest!.TestId);
+        Assert.Equal(second.Result.CompletedAtUtc, fixture.StateStore.State.LastTest.CompletedAtUtc);
+        Assert.Equal(Now, fixture.StateStore.State.HighestObservedUtc);
         Assert.Equal(before.FormalSlots, fixture.StateStore.State.FormalSlots);
         Assert.Equal(beforeNextSlot, GetNextSlot(fixture, fixture.StateStore.State));
         Assert.Equal(2, fixture.Launcher.CallCount);
-        Assert.Equal(2, fixture.StateStore.SaveCount);
+        Assert.Equal(4, fixture.StateStore.SaveCount);
         Assert.True(fixture.StateStore.SaveObservedMutexHeld);
         Assert.Equal(2, fixture.LogWriter.Entries.Count);
+        Assert.Equal(EligibilityReason.TestNowExplicitlyConfirmed, first.Decision.Reason);
+        Assert.All(fixture.StateStore.State.Eligibility!.Observations.Where(item =>
+                item.Kind is EligibilityObservationKind.AttemptStarted or EligibilityObservationKind.ConfirmedSuccess),
+            observation => Assert.Equal(ObservationSource.AppTestNow, observation.Source));
         Assert.All(fixture.LogWriter.Entries, entry =>
         {
             Assert.Equal(StructuredLogKind.TEST_NOW, entry.Kind);
@@ -54,14 +62,10 @@ public sealed class TestRunServiceTests
         var fixture = CreateFixture(CreateStateWithFormalHistory());
         var before = fixture.StateStore.State;
         using var cancellation = new CancellationTokenSource();
-        fixture.EnvironmentDetector.OnDetect = token =>
-        {
-            cancellation.Cancel();
-            return Task.FromResult(fixture.EnvironmentDetector.Status);
-        };
+        cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => fixture.Service.RunAsync(fixture.Config, cancellation.Token));
+            () => fixture.Service.RunAsync("test-run-cancelled", userConfirmed: true, cancellation.Token));
 
         Assert.Equal(0, fixture.Launcher.CallCount);
         Assert.Equal(0, fixture.StateStore.SaveCount);
@@ -86,18 +90,64 @@ public sealed class TestRunServiceTests
             "usage-limit");
         var fixture = CreateFixture(before, failed);
 
-        var result = await fixture.Service.RunAsync(fixture.Config, CancellationToken.None);
+        var result = await fixture.Service.RunAsync("test-run-limit", userConfirmed: true, CancellationToken.None);
 
-        Assert.Equal(CodexResultClassification.ATTEMPTED_UNCONFIRMED, result.Invocation.Classification);
+        Assert.NotNull(result.Result);
+        Assert.Equal(CodexResultClassification.ATTEMPTED_UNCONFIRMED, result.Result!.Invocation.Classification);
         Assert.Equal("usage-limit", fixture.StateStore.State.LastTest!.ResultCategory);
-        Assert.Equal(result.TestId, fixture.StateStore.State.LastTest.TestId);
+        Assert.Equal(result.Result.TestId, fixture.StateStore.State.LastTest.TestId);
         Assert.Equal(before.FormalSlots, fixture.StateStore.State.FormalSlots);
-        Assert.Equal(before.HighestObservedUtc, fixture.StateStore.State.HighestObservedUtc);
+        Assert.Equal(Now, fixture.StateStore.State.HighestObservedUtc);
         Assert.Equal(1, fixture.Launcher.CallCount);
+        Assert.Contains(fixture.StateStore.State.Eligibility!.Observations,
+            observation => observation.Kind == EligibilityObservationKind.AttemptStarted &&
+                           observation.Source == ObservationSource.AppTestNow);
+        Assert.Contains(fixture.StateStore.State.Eligibility.Observations,
+            observation => observation.Kind == EligibilityObservationKind.UsageLimitReached &&
+                           observation.Source == ObservationSource.AppTestNow && observation.TrustedResetAtUtc is null);
+        Assert.DoesNotContain(fixture.StateStore.State.Eligibility.Observations,
+            observation => observation.Kind == EligibilityObservationKind.ConfirmedSuccess &&
+                           observation.Source == ObservationSource.AppTestNow);
         Assert.Single(fixture.LogWriter.Entries);
         Assert.Equal(StructuredLogKind.TEST_NOW, fixture.LogWriter.Entries[0].Kind);
-        Assert.Equal(result.TestId, fixture.LogWriter.Entries[0].TestId);
+        Assert.Equal(result.Result.TestId, fixture.LogWriter.Entries[0].TestId);
         Assert.Null(fixture.LogWriter.Entries[0].SlotId);
+    }
+
+    [Fact]
+    public async Task UnconfirmedTestNow_DoesNotLaunchOrCreateAClaim()
+    {
+        using var testData = new IsolatedLocalAppData();
+        var fixture = CreateFixture(CreateStateWithFormalHistory());
+
+        var response = await fixture.Service.RunAsync("test-run-unconfirmed", userConfirmed: false,
+            CancellationToken.None);
+
+        Assert.Equal(EligibilityStatus.ConfirmationRequired, response.Decision.Status);
+        Assert.Null(response.Result);
+        Assert.Equal(0, fixture.Launcher.CallCount);
+        Assert.Null(fixture.StateStore.State.ActiveTestNowClaim);
+        Assert.Equal(0, fixture.StateStore.SaveCount);
+    }
+
+    [Fact]
+    public async Task AttemptedFailure_IsRecordedWithoutConfirmedSuccessObservation()
+    {
+        using var testData = new IsolatedLocalAppData();
+        var failed = new CodexInvocationResult(CodexResultClassification.ATTEMPTED_UNCONFIRMED, true, 1, 20,
+            false, null, Array.Empty<string>(), null, "stream-error");
+        var fixture = CreateFixture(CreateStateWithFormalHistory(), failed);
+
+        var response = await fixture.Service.RunAsync("test-run-failed", userConfirmed: true, CancellationToken.None);
+
+        Assert.Equal(CodexResultClassification.ATTEMPTED_UNCONFIRMED, response.Result!.Invocation.Classification);
+        Assert.Contains(fixture.StateStore.State.Eligibility!.Observations,
+            observation => observation.Kind == EligibilityObservationKind.AttemptStarted &&
+                           observation.Source == ObservationSource.AppTestNow);
+        Assert.DoesNotContain(fixture.StateStore.State.Eligibility.Observations,
+            observation => observation.Kind == EligibilityObservationKind.ConfirmedSuccess &&
+                           observation.Source == ObservationSource.AppTestNow);
+        Assert.Null(fixture.StateStore.State.ActiveTestNowClaim);
     }
 
     private static TestRunFixture CreateFixture(StateDocument state, CodexInvocationResult? result = null) =>
@@ -106,6 +156,11 @@ public sealed class TestRunServiceTests
     private static StateDocument CreateStateWithFormalHistory() => StateDocument.Empty() with
     {
         HighestObservedUtc = Now.AddMinutes(-2),
+        Eligibility = EligibilityState.Empty() with
+        {
+            HighestObservedUtc = Now.AddMinutes(-2),
+            ExternalManualUsageUnknown = false
+        },
         FormalSlots =
         [
             new FormalSlotRecord(
@@ -129,25 +184,29 @@ public sealed class TestRunServiceTests
 
     private sealed class TestRunFixture
     {
-        private readonly RecordingStateMutex _mutex;
-
         public TestRunFixture(StateDocument state, CodexInvocationResult? result)
         {
             Config = AppConfigDefaults.Create() with { TimeZone = "UTC" };
             Clock = new FixedClock(Now);
             TimeZoneProvider = new FixedTimeZoneProvider();
-            _mutex = new RecordingStateMutex();
-            StateStore = new InMemoryStateStore(state, () => _mutex.IsHeld);
+            Mutex = new RecordingStateMutex();
+            ConfigStore = new InMemoryConfigStore(Config);
+            StateStore = new InMemoryStateStore(state, () => Mutex.IsHeld);
             EnvironmentDetector = new FakeEnvironmentDetector(ReadyEnvironment());
             Launcher = new RecordingLauncher(result ?? ConfirmedSuccess());
             LogWriter = new RecordingLogWriter();
-            Service = new TestRunService(Clock, TimeZoneProvider, StateStore, _mutex, EnvironmentDetector, Launcher, LogWriter);
+            ClaimService = new FormalSlotClaimService(Clock, TimeZoneProvider, ConfigStore, StateStore, Mutex,
+                new SlotAdmissionEvaluator(TimeZoneProvider), new EligibilityEvaluator());
+            Service = new TestRunService(Clock, TimeZoneProvider, ClaimService, EnvironmentDetector, Launcher, LogWriter);
         }
 
         public AppConfig Config { get; }
         public FixedClock Clock { get; }
         public FixedTimeZoneProvider TimeZoneProvider { get; }
+        public RecordingStateMutex Mutex { get; }
+        public InMemoryConfigStore ConfigStore { get; }
         public InMemoryStateStore StateStore { get; }
+        public FormalSlotClaimService ClaimService { get; }
         public FakeEnvironmentDetector EnvironmentDetector { get; }
         public RecordingLauncher Launcher { get; }
         public RecordingLogWriter LogWriter { get; }
@@ -228,6 +287,13 @@ public sealed class TestRunServiceTests
             State = state;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class InMemoryConfigStore(AppConfig config) : IConfigStore
+    {
+        public Task<AppConfig> LoadOrCreateAsync(CancellationToken cancellationToken) => Task.FromResult(config);
+
+        public Task SaveAsync(AppConfig savedConfig, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class RecordingStateMutex : IStateMutex

@@ -1,8 +1,10 @@
 using CodexSlotPing.App;
 using CodexSlotPing.Core.Codex;
+using CodexSlotPing.Core.Concurrency;
 using CodexSlotPing.Core.Configuration;
-using CodexSlotPing.Core.Scheduler;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Slots;
+using CodexSlotPing.Core.Scheduler;
 using CodexSlotPing.Core.State;
 using CodexSlotPing.Core.Testing;
 using CodexSlotPing.Core.Time;
@@ -96,6 +98,49 @@ public sealed class AppControllerTests
         var result = await fixture.Controller.RunTestNowAsync(true, CancellationToken.None);
         Assert.NotNull(result);
         Assert.Equal(1, fixture.TestNowCallCount);
+        Assert.NotNull(result!.Result);
+    }
+
+    [Fact]
+    public async Task UiAndRunnerUseTheSameScheduledDecisionReason()
+    {
+        var fixture = new Fixture(AppConfigDefaults.Create(),
+            Status(SchedulerState.OFF, exists: false, owned: false, enabled: false, RunnerPath));
+
+        var screen = await fixture.Controller.RefreshAsync(CancellationToken.None);
+        var runnerClaim = await fixture.ClaimService.TryClaimCurrentSlotAsync(CancellationToken.None);
+
+        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, screen.EligibilityDecision.Reason);
+        Assert.Equal(screen.EligibilityDecision.Reason, runnerClaim.EligibilityDecision!.Reason);
+    }
+
+    [Fact]
+    public async Task StaleTestNowDecisionCannotBypassNewClockRollbackState()
+    {
+        var fixture = new Fixture(AppConfigDefaults.Create(),
+            Status(SchedulerState.OFF, exists: false, owned: false, enabled: false, RunnerPath));
+        var preview = await fixture.Controller.GetTestNowEligibilityDecisionAsync(CancellationToken.None);
+        Assert.True(preview.RequiresConfirmation);
+
+        var highWater = Now.AddMinutes(5);
+        fixture.StateStore.SetState(StateDocument.Empty() with
+        {
+            HighestObservedUtc = highWater,
+            Eligibility = EligibilityState.Empty() with { HighestObservedUtc = highWater }
+        });
+        fixture.TestNowRunner = async (testId, cancellationToken) =>
+        {
+            var claim = await fixture.ClaimService.TryClaimTestNowAsync(testId, userConfirmed: true, cancellationToken);
+            return new TestNowRunResponse(claim.EligibilityDecision!, null);
+        };
+
+        var response = await fixture.Controller.RunTestNowAsync(true, CancellationToken.None);
+
+        Assert.NotNull(response);
+        Assert.Null(response!.Result);
+        Assert.Equal(EligibilityReason.ClockRollback, response.Decision.Reason);
+        Assert.Null(fixture.StateStore.State.ActiveTestNowClaim);
+        Assert.False(fixture.StateStore.State.Eligibility!.HasUnresolvedClaim);
     }
 
     [Fact]
@@ -163,11 +208,16 @@ public sealed class AppControllerTests
             var timeZone = new FixedTimeZoneProvider();
             EnvironmentDetector = new ReadyEnvironmentDetector();
             Scheduler = new MemoryScheduler(schedulerStatus, RunnerPath);
+            StateStore = new MemoryStateStore();
+            Mutex = new RecordingStateMutex();
+            ClaimService = new FormalSlotClaimService(new FixedClock(Now), timeZone, ConfigStore, StateStore, Mutex,
+                new SlotAdmissionEvaluator(timeZone), new EligibilityEvaluator());
             Controller = new AppController(
                 new FixedClock(Now),
                 timeZone,
                 ConfigStore,
-                new MemoryStateStore(),
+                StateStore,
+                ClaimService,
                 Scheduler,
                 EnvironmentDetector,
                 RunnerPath,
@@ -178,17 +228,30 @@ public sealed class AppControllerTests
         public MemoryConfigStore ConfigStore { get; }
         public MemoryScheduler Scheduler { get; }
         public ReadyEnvironmentDetector EnvironmentDetector { get; }
+        public MemoryStateStore StateStore { get; }
+        public RecordingStateMutex Mutex { get; }
+        public FormalSlotClaimService ClaimService { get; }
         public AppController Controller { get; }
         public int TestNowCallCount { get; private set; }
+        public Func<string, CancellationToken, Task<TestNowRunResponse>>? TestNowRunner { get; set; }
 
-        private Task<TestRunResult> RunTestNowAsync(AppConfig config, CancellationToken cancellationToken)
+        private Task<TestNowRunResponse> RunTestNowAsync(string testId, CancellationToken cancellationToken)
         {
             TestNowCallCount++;
-            return Task.FromResult(new TestRunResult(
-                "test-id",
-                new CodexInvocationResult(CodexResultClassification.CONFIRMED_SUCCESS, true, 0, 10,
-                    false, null, Array.Empty<string>(), null, null),
-                Now));
+            if (TestNowRunner is not null)
+            {
+                return TestNowRunner(testId, cancellationToken);
+            }
+
+            return Task.FromResult(new TestNowRunResponse(
+                new EligibilityDecision(EligibilityDecision.CurrentSchemaVersion, EligibilityIntent.TestNow,
+                    EligibilityStatus.Eligible, EligibilityReason.Ready, null, Confidence.Unknown,
+                    ObservationSource.Unknown, false),
+                new TestRunResult(
+                    testId,
+                    new CodexInvocationResult(CodexResultClassification.CONFIRMED_SUCCESS, true, 0, 10,
+                        false, null, Array.Empty<string>(), null, null),
+                    Now)));
         }
     }
 
@@ -233,8 +296,28 @@ public sealed class AppControllerTests
 
     private sealed class MemoryStateStore : IStateStore
     {
-        public Task<StateDocument> LoadAsync(CancellationToken cancellationToken) => Task.FromResult(StateDocument.Empty());
-        public Task SaveAsync(StateDocument state, CancellationToken cancellationToken) => Task.CompletedTask;
+        public StateDocument State { get; private set; } = StateDocument.Empty();
+        public void SetState(StateDocument state) => State = state;
+        public Task<StateDocument> LoadAsync(CancellationToken cancellationToken) => Task.FromResult(State);
+        public Task SaveAsync(StateDocument state, CancellationToken cancellationToken)
+        {
+            State = state;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingStateMutex : IStateMutex
+    {
+        private bool _held;
+        public StateMutexLease? TryAcquire(TimeSpan timeout)
+        {
+            if (_held)
+            {
+                return null;
+            }
+            _held = true;
+            return new StateMutexLease(() => _held = false);
+        }
     }
 
     private sealed class MemoryScheduler(SchedulerStatus initial, string expectedRunner) : ITaskSchedulerGateway

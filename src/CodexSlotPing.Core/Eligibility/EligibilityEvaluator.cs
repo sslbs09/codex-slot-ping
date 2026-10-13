@@ -79,6 +79,21 @@ public sealed class EligibilityEvaluator : IEligibilityEvaluator
             }
         }
 
+        if (request.Intent == EligibilityIntent.TestNow)
+        {
+            return request.TestNowConfirmation == TestNowConfirmation.Confirmed
+                ? Decision(
+                    request.Intent,
+                    EligibilityStatus.Eligible,
+                    EligibilityReason.TestNowExplicitlyConfirmed,
+                    observationSource: ObservationSource.AppTestNow)
+                : Decision(
+                    request.Intent,
+                    EligibilityStatus.ConfirmationRequired,
+                    EligibilityReason.TestNowConfirmationRequired,
+                    requiresConfirmation: true);
+        }
+
         if (state.ExternalManualUsageUnknown)
         {
             return Decision(

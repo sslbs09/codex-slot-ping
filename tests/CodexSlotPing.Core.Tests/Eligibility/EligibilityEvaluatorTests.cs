@@ -91,6 +91,30 @@ public sealed class EligibilityEvaluatorTests
     }
 
     [Fact]
+    public void TestNowWithoutUsageLimit_StillRequiresOneExplicitConfirmation()
+    {
+        var decision = _evaluator.Evaluate(
+            KnownExternalUsageState(),
+            EligibilityRequest.TestNow(Now));
+
+        Assert.Equal(EligibilityStatus.ConfirmationRequired, decision.Status);
+        Assert.Equal(EligibilityReason.TestNowConfirmationRequired, decision.Reason);
+        Assert.True(decision.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void ConfirmedTestNowWithoutUsageLimit_IsEligible()
+    {
+        var decision = _evaluator.Evaluate(
+            KnownExternalUsageState(),
+            EligibilityRequest.ConfirmedTestNow(Now));
+
+        Assert.Equal(EligibilityStatus.Eligible, decision.Status);
+        Assert.Equal(EligibilityReason.TestNowExplicitlyConfirmed, decision.Reason);
+        Assert.False(decision.RequiresConfirmation);
+    }
+
+    [Fact]
     public void ConfirmedTestNow_ReturnsManualDecisionWithoutClearingUsageLimit()
     {
         var usageLimit = Observation(EligibilityObservationKind.UsageLimitReached, Now.AddMinutes(-1));
@@ -110,15 +134,17 @@ public sealed class EligibilityEvaluatorTests
     }
 
     [Fact]
-    public void TestNowConfirmation_DoesNotResolveUnknownExternalUsage()
+    public void ConfirmedTestNow_CanMakeOneExplicitAttemptWhileExternalUsageRemainsUnknown()
     {
+        var state = EligibilityState.Empty();
         var decision = _evaluator.Evaluate(
-            EligibilityState.Empty(),
+            state,
             EligibilityRequest.ConfirmedTestNow(Now));
 
-        Assert.Equal(EligibilityStatus.Unknown, decision.Status);
-        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, decision.Reason);
+        Assert.Equal(EligibilityStatus.Eligible, decision.Status);
+        Assert.Equal(EligibilityReason.TestNowExplicitlyConfirmed, decision.Reason);
         Assert.False(decision.RequiresConfirmation);
+        Assert.True(state.ExternalManualUsageUnknown);
     }
 
     [Fact]

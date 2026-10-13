@@ -1,4 +1,5 @@
 using CodexSlotPing.Core.Concurrency;
+using CodexSlotPing.Core.Codex;
 using CodexSlotPing.Core.Configuration;
 using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Slots;
@@ -230,6 +231,155 @@ public sealed class FormalSlotClaimServiceTests
         Assert.Equal(SlotClaimKind.Blocked, result.Kind);
         Assert.Equal(EligibilityReason.UsageLimitWithoutTrustedReset, result.EligibilityDecision!.Reason);
         Assert.Empty(fixture.StateStore.State.FormalSlots);
+    }
+
+    [Fact]
+    public async Task TestNowUsageLimitWithoutConfirmation_DoesNotClaim()
+    {
+        var now = AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(7, 1));
+        var knownState = KnownState();
+        var state = knownState with
+        {
+            Eligibility = knownState.Eligibility! with
+            {
+                Observations = [new EligibilityObservation(
+                    EligibilityObservationKind.UsageLimitReached,
+                    now.AddMinutes(-1),
+                    ObservationSource.AppScheduled,
+                    Confidence.High)]
+            }
+        };
+        var fixture = CreateFixture(now, state: state);
+
+        var result = await fixture.Service.TryClaimTestNowAsync("test-request-001", userConfirmed: false,
+            CancellationToken.None);
+
+        Assert.Equal(TestNowClaimKind.NotEligible, result.Kind);
+        Assert.Equal(EligibilityStatus.ConfirmationRequired, result.EligibilityDecision!.Status);
+        Assert.Equal(EligibilityReason.TestNowConfirmationRequired, result.EligibilityDecision.Reason);
+        Assert.Null(fixture.StateStore.State.ActiveTestNowClaim);
+        Assert.Equal(0, fixture.StateStore.SaveCount);
+    }
+
+    [Fact]
+    public async Task ConfirmedTestNowClaimsOnceAndUsageLimitStillBlocksScheduledClaim()
+    {
+        var now = AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(7, 1));
+        var knownState = KnownState();
+        var usageLimit = new EligibilityObservation(
+            EligibilityObservationKind.UsageLimitReached,
+            now.AddMinutes(-1),
+            ObservationSource.AppScheduled,
+            Confidence.High);
+        var state = knownState with
+        {
+            Eligibility = knownState.Eligibility! with { Observations = [usageLimit] }
+        };
+        var fixture = CreateFixture(now, state: state);
+
+        var claim = await fixture.Service.TryClaimTestNowAsync("test-request-002", userConfirmed: true,
+            CancellationToken.None);
+        var duplicate = await fixture.Service.TryClaimTestNowAsync("test-request-002", userConfirmed: true,
+            CancellationToken.None);
+
+        Assert.True(claim.IsClaimed);
+        Assert.Equal(EligibilityReason.TestNowExplicitlyConfirmed, claim.EligibilityDecision!.Reason);
+        Assert.Equal("test-request-002", fixture.StateStore.State.ActiveTestNowClaim!.TestId);
+        Assert.True(fixture.StateStore.State.Eligibility!.HasUnresolvedClaim);
+        Assert.Contains(usageLimit, fixture.StateStore.State.Eligibility.Observations);
+        Assert.Contains(fixture.StateStore.State.Eligibility.Observations,
+            observation => observation.Kind == EligibilityObservationKind.TestNowConfirmationGranted &&
+                           observation.Source == ObservationSource.AppTestNow);
+        Assert.Equal(TestNowClaimKind.AlreadyConsumed, duplicate.Kind);
+        Assert.Equal(1, fixture.StateStore.SaveCount);
+
+        var whileActive = await fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None);
+        Assert.Equal(EligibilityReason.UnresolvedClaim, whileActive.EligibilityDecision!.Reason);
+
+        var invocation = new CodexInvocationResult(
+            CodexResultClassification.ATTEMPTED_UNCONFIRMED,
+            true,
+            1,
+            50,
+            false,
+            null,
+            Array.Empty<string>(),
+            null,
+            "usage-limit");
+        var record = new TestRunRecord("test-request-002", now.AddSeconds(30), "gpt-5.6-luna", "low",
+            "usage-limit", 50, 1);
+        Assert.True(await fixture.Service.FinalizeTestNowAsync("test-request-002", record, invocation, now,
+            CancellationToken.None));
+
+        Assert.Null(fixture.StateStore.State.ActiveTestNowClaim);
+        Assert.False(fixture.StateStore.State.Eligibility!.HasUnresolvedClaim);
+        Assert.Contains(usageLimit, fixture.StateStore.State.Eligibility.Observations);
+        Assert.Contains(fixture.StateStore.State.Eligibility.Observations,
+            observation => observation.Kind == EligibilityObservationKind.UsageLimitReached &&
+                           observation.Source == ObservationSource.AppTestNow &&
+                           observation.TrustedResetAtUtc is null);
+        fixture.Clock.Now = now.AddMinutes(1);
+        var scheduled = await fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None);
+        Assert.Equal(EligibilityReason.UsageLimitWithoutTrustedReset, scheduled.EligibilityDecision!.Reason);
+    }
+
+    [Fact]
+    public async Task ConfirmedTestNowWithoutUsageLimit_CanClaimOneManualAttempt()
+    {
+        var fixture = CreateFixture(AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(7, 1)));
+
+        var results = await Task.WhenAll(
+            fixture.Service.TryClaimTestNowAsync("test-request-003", userConfirmed: true, CancellationToken.None),
+            fixture.Service.TryClaimTestNowAsync("test-request-003", userConfirmed: true, CancellationToken.None));
+
+        Assert.Single(results, result => result.IsClaimed);
+        Assert.Single(results, result => result.Kind == TestNowClaimKind.AlreadyConsumed);
+        Assert.Equal(EligibilityReason.TestNowExplicitlyConfirmed,
+            Assert.Single(results, result => result.IsClaimed).EligibilityDecision!.Reason);
+        Assert.Equal(1, fixture.StateStore.SaveCount);
+        Assert.Equal("test-request-003", fixture.StateStore.State.ActiveTestNowClaim!.TestId);
+    }
+
+    [Fact]
+    public async Task ConfirmedTestNowCanClaimWhileExternalUsageIsUnknown_AndKeepsSchedulerBlocked()
+    {
+        var now = AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(7, 1));
+        var fixture = CreateFixture(now, state: StateDocument.Empty());
+
+        var preview = await fixture.Service.GetEligibilityDecisionAsync(
+            EligibilityRequest.TestNow(now), CancellationToken.None);
+        var unconfirmed = await fixture.Service.TryClaimTestNowAsync(
+            "test-request-unknown-usage", userConfirmed: false, CancellationToken.None);
+        var confirmed = await fixture.Service.TryClaimTestNowAsync(
+            "test-request-unknown-usage", userConfirmed: true, CancellationToken.None);
+
+        Assert.Equal(EligibilityStatus.ConfirmationRequired, preview.Status);
+        Assert.True(preview.RequiresConfirmation);
+        Assert.Equal(TestNowClaimKind.NotEligible, unconfirmed.Kind);
+        Assert.True(confirmed.IsClaimed);
+        Assert.Equal(EligibilityReason.TestNowExplicitlyConfirmed, confirmed.EligibilityDecision!.Reason);
+        Assert.True(fixture.StateStore.State.Eligibility!.ExternalManualUsageUnknown);
+
+        var invocation = new CodexInvocationResult(
+            CodexResultClassification.PRELAUNCH_FAILED,
+            false,
+            null,
+            0,
+            false,
+            null,
+            Array.Empty<string>(),
+            null,
+            "cli-environment-not-ready");
+        var record = new TestRunRecord("test-request-unknown-usage", now, "gpt-5.6-luna", "low",
+            "cli-environment-not-ready", 0, null);
+        Assert.True(await fixture.Service.FinalizeTestNowAsync(
+            "test-request-unknown-usage", record, invocation, null, CancellationToken.None));
+
+        fixture.Clock.Now = now.AddMinutes(1);
+        var scheduled = await fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None);
+        Assert.Equal(EligibilityStatus.Unknown, scheduled.EligibilityDecision!.Status);
+        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, scheduled.EligibilityDecision.Reason);
+        Assert.True(fixture.StateStore.State.Eligibility!.ExternalManualUsageUnknown);
     }
 
     [Fact]
