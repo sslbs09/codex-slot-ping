@@ -21,22 +21,26 @@ public sealed class NamedStateMutexTests
         using var contender = new NamedStateMutex(sid);
         using var releaseOwner = new ManualResetEventSlim(false);
         var ownerAcquired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var ownerTask = Task.Run(() =>
-        {
-            using var lease = owner.TryAcquire(TimeSpan.Zero)
-                ?? throw new InvalidOperationException("The initial mutex acquisition should succeed.");
-            ownerAcquired.SetResult();
-            if (!releaseOwner.Wait(TimeSpan.FromSeconds(3)))
+        var ownerTask = Task.Factory.StartNew(
+            () =>
             {
-                throw new TimeoutException("The test did not release the owning thread.");
-            }
-        });
-        await ownerAcquired.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                using var lease = owner.TryAcquire(TimeSpan.Zero)
+                    ?? throw new InvalidOperationException("The initial mutex acquisition should succeed.");
+                ownerAcquired.SetResult();
+                if (!releaseOwner.Wait(TimeSpan.FromSeconds(10)))
+                {
+                    throw new TimeoutException("The test did not release the owning thread.");
+                }
+            },
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
 
         bool blocked;
         try
         {
-            blocked = await Task.Run(() => contender.TryAcquire(TimeSpan.FromMilliseconds(100)) is null);
+            await ownerAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            blocked = contender.TryAcquire(TimeSpan.FromMilliseconds(100)) is null;
         }
         finally
         {
@@ -45,12 +49,7 @@ public sealed class NamedStateMutexTests
         }
 
         Assert.True(blocked);
-        var acquiredAfterRelease = await Task.Run(() =>
-        {
-            using var acquiredLease = contender.TryAcquire(TimeSpan.FromSeconds(1));
-            return acquiredLease is not null;
-        });
-
-        Assert.True(acquiredAfterRelease);
+        using var acquiredLease = contender.TryAcquire(TimeSpan.FromSeconds(1));
+        Assert.NotNull(acquiredLease);
     }
 }
