@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Threading;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Configuration;
 using CodexSlotPing.Core.Persistence;
 using CodexSlotPing.Core.Scheduler;
 using CodexSlotPing.Core.Slots;
+using CodexSlotPing.Core.State;
 using CodexSlotPing.Runner;
 
 namespace CodexSlotPing.IntegrationTests.Runner;
@@ -46,6 +48,11 @@ public sealed class TwoRunnerProcessesTests
             };
             var atomicFile = new AtomicJsonFile(new PhysicalAtomicFileOperations());
             await new JsonConfigStore(atomicFile, dataPaths.ConfigPath).SaveAsync(config, CancellationToken.None);
+            var stateStore = new JsonStateStore(atomicFile, statePath);
+            await stateStore.SaveAsync(StateDocument.Empty() with
+            {
+                Eligibility = EligibilityState.Empty() with { ExternalManualUsageUnknown = false }
+            }, CancellationToken.None);
 
             var installed = await gateway.InstallOrUpdateAsync(taskDefinition with { SlotTimes = slots }, CancellationToken.None);
             Assert.True(installed.Succeeded, installed.DiagnosticCategory);
@@ -75,9 +82,13 @@ public sealed class TwoRunnerProcessesTests
 
             Assert.True(File.Exists(statePath), $"Runner did not use isolated LocalAppData state path {statePath}.");
             using var state = JsonDocument.Parse(await File.ReadAllTextAsync(statePath));
+            Assert.Equal(StateDocument.CurrentSchemaVersion, state.RootElement.GetProperty("schemaVersion").GetInt32());
             var formalSlots = state.RootElement.GetProperty("formalSlots").EnumerateArray().ToArray();
             Assert.Single(formalSlots);
             Assert.Equal("CONFIRMED_SUCCESS", formalSlots[0].GetProperty("status").GetString());
+            var eligibility = state.RootElement.GetProperty("eligibility");
+            Assert.False(eligibility.GetProperty("hasUnresolvedClaim").GetBoolean());
+            Assert.NotNull(eligibility.GetProperty("lastAttemptAtUtc").GetString());
         }
         finally
         {

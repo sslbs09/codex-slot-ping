@@ -32,6 +32,7 @@ public enum EligibilityReason
     TestNowConfirmationRequired,
     TestNowExplicitlyConfirmed,
     ClockRollback,
+    UnresolvedClaim,
     UnsupportedStateSchema,
     InvalidRequest,
     InvalidState
@@ -74,9 +75,10 @@ public sealed record EligibilityState(
     [property: JsonRequired] DateTimeOffset? LastAttemptAtUtc,
     [property: JsonRequired] DateTimeOffset? LastConfirmedSuccessAtUtc,
     [property: JsonRequired] bool ExternalManualUsageUnknown,
-    [property: JsonRequired] IReadOnlyList<EligibilityObservation> Observations)
+    [property: JsonRequired] IReadOnlyList<EligibilityObservation> Observations,
+    [property: JsonRequired] bool HasUnresolvedClaim)
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public static EligibilityState Empty() =>
         new(
@@ -85,7 +87,8 @@ public sealed record EligibilityState(
             null,
             null,
             ExternalManualUsageUnknown: true,
-            Array.Empty<EligibilityObservation>());
+            Array.Empty<EligibilityObservation>(),
+            HasUnresolvedClaim: false);
 }
 
 public sealed record EligibilityRequest(

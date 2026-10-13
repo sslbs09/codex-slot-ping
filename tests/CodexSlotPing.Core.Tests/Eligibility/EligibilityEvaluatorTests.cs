@@ -159,6 +159,17 @@ public sealed class EligibilityEvaluatorTests
     }
 
     [Fact]
+    public void UnresolvedClaim_FailsClosedForScheduledRequest()
+    {
+        var state = KnownExternalUsageState() with { HasUnresolvedClaim = true };
+
+        var decision = _evaluator.Evaluate(state, EligibilityRequest.Scheduled(Now));
+
+        Assert.Equal(EligibilityStatus.Blocked, decision.Status);
+        Assert.Equal(EligibilityReason.UnresolvedClaim, decision.Reason);
+    }
+
+    [Fact]
     public void AttemptAndSuccessTimestamps_DoNotCreateQuotaOrResetPredictions()
     {
         var state = KnownExternalUsageState() with

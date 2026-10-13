@@ -51,12 +51,14 @@ public sealed class EligibilityEvaluator : IEligibilityEvaluator
                 confidence: Confidence.High);
         }
 
-        if (state.ExternalManualUsageUnknown)
+        if (state.HasUnresolvedClaim)
         {
             return Decision(
                 request.Intent,
-                EligibilityStatus.Unknown,
-                EligibilityReason.ExternalManualUsageUnknown);
+                EligibilityStatus.Blocked,
+                EligibilityReason.UnresolvedClaim,
+                confidence: Confidence.High,
+                observationSource: ObservationSource.AppScheduled);
         }
 
         var latestUsageLimit = state.Observations
@@ -75,6 +77,14 @@ public sealed class EligibilityEvaluator : IEligibilityEvaluator
             {
                 return EvaluateUsageLimit(request, usageLimit, trustedResetAtUtc);
             }
+        }
+
+        if (state.ExternalManualUsageUnknown)
+        {
+            return Decision(
+                request.Intent,
+                EligibilityStatus.Unknown,
+                EligibilityReason.ExternalManualUsageUnknown);
         }
 
         return Decision(

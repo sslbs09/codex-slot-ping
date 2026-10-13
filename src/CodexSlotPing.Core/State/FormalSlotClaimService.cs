@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CodexSlotPing.Core.Concurrency;
 using CodexSlotPing.Core.Configuration;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Slots;
 using CodexSlotPing.Core.Time;
 
@@ -14,7 +15,8 @@ public sealed class FormalSlotClaimService
     private readonly IConfigStore _configStore;
     private readonly IStateStore _stateStore;
     private readonly IStateMutex _stateMutex;
-    private readonly SlotAdmissionEvaluator _admissionEvaluator;
+    private readonly SlotAdmissionEvaluator _slotAdmissionEvaluator;
+    private readonly IEligibilityEvaluator _eligibilityEvaluator;
 
     public FormalSlotClaimService(
         IClock clock,
@@ -22,14 +24,16 @@ public sealed class FormalSlotClaimService
         IConfigStore configStore,
         IStateStore stateStore,
         IStateMutex stateMutex,
-        SlotAdmissionEvaluator admissionEvaluator)
+        SlotAdmissionEvaluator slotAdmissionEvaluator,
+        IEligibilityEvaluator eligibilityEvaluator)
     {
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _timeZoneProvider = timeZoneProvider ?? throw new ArgumentNullException(nameof(timeZoneProvider));
         _configStore = configStore ?? throw new ArgumentNullException(nameof(configStore));
         _stateStore = stateStore ?? throw new ArgumentNullException(nameof(stateStore));
         _stateMutex = stateMutex ?? throw new ArgumentNullException(nameof(stateMutex));
-        _admissionEvaluator = admissionEvaluator ?? throw new ArgumentNullException(nameof(admissionEvaluator));
+        _slotAdmissionEvaluator = slotAdmissionEvaluator ?? throw new ArgumentNullException(nameof(slotAdmissionEvaluator));
+        _eligibilityEvaluator = eligibilityEvaluator ?? throw new ArgumentNullException(nameof(eligibilityEvaluator));
     }
 
     public Task<SlotClaimResult> TryClaimCurrentSlotAsync(CancellationToken cancellationToken)
@@ -60,11 +64,13 @@ public sealed class FormalSlotClaimService
         using (lease)
         {
             AppConfig config;
+            StateDocument loadedState;
             StateDocument state;
             try
             {
                 config = _configStore.LoadOrCreateAsync(cancellationToken).GetAwaiter().GetResult();
-                state = _stateStore.LoadAsync(cancellationToken).GetAwaiter().GetResult();
+                loadedState = _stateStore.LoadAsync(cancellationToken).GetAwaiter().GetResult();
+                state = StateDocumentMigrator.MigrateV1ToV2(loadedState);
             }
             catch (OperationCanceledException)
             {
@@ -81,10 +87,45 @@ public sealed class FormalSlotClaimService
             }
 
             var nowUtc = _clock.UtcNow.ToUniversalTime();
-            var rollback = ClockRollbackGuard.Evaluate(nowUtc, state.HighestObservedUtc);
-            if (rollback.IsBlocked)
+            var eligibilityState = state.Eligibility! with { HighestObservedUtc = state.HighestObservedUtc };
+            var decision = _eligibilityEvaluator.Evaluate(
+                eligibilityState,
+                EligibilityRequest.Scheduled(nowUtc));
+            if (decision.Reason == EligibilityReason.ClockRollback)
             {
-                return Blocked(SlotClaimBlockReason.ClockRollback);
+                return SaveResultOrBlock(
+                    loadedState,
+                    state,
+                    SlotClaimKind.Blocked,
+                    SlotClaimBlockReason.ClockRollback,
+                    null,
+                    null,
+                    decision,
+                    cancellationToken);
+            }
+
+            var newHighestObservedUtc = state.HighestObservedUtc is { } priorHighWater && priorHighWater > nowUtc
+                ? priorHighWater
+                : nowUtc;
+            var stateAtNow = WithHighWater(state, newHighestObservedUtc);
+
+            if (decision.Status != EligibilityStatus.Eligible)
+            {
+                var resultKind = decision.Status == EligibilityStatus.NotYetEligible
+                    ? SlotClaimKind.NotEligible
+                    : SlotClaimKind.Blocked;
+                SlotClaimBlockReason? blockReason = resultKind == SlotClaimKind.Blocked
+                    ? SlotClaimBlockReason.EligibilityNotSatisfied
+                    : null;
+                return SaveResultOrBlock(
+                    loadedState,
+                    stateAtNow,
+                    resultKind,
+                    blockReason,
+                    null,
+                    resultKind == SlotClaimKind.NotEligible ? FormalSlotStatus.PENDING : null,
+                    decision,
+                    cancellationToken);
             }
 
             string currentWindowsTimeZoneId;
@@ -94,10 +135,10 @@ public sealed class FormalSlotClaimService
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                return SaveHighWaterOrBlock(state, rollback.NewHighestObservedUtc, SlotClaimBlockReason.TimeZoneUnavailable, cancellationToken);
+                return SaveHighWaterOrBlock(loadedState, stateAtNow, SlotClaimBlockReason.TimeZoneUnavailable, cancellationToken, decision: decision);
             }
 
-            var admission = _admissionEvaluator.Evaluate(config, nowUtc, currentWindowsTimeZoneId);
+            var admission = _slotAdmissionEvaluator.Evaluate(config, nowUtc, currentWindowsTimeZoneId);
             if (admission.Kind == SlotAdmissionKind.Blocked)
             {
                 var reason = admission.BlockReason switch
@@ -106,22 +147,27 @@ public sealed class FormalSlotClaimService
                     AdmissionBlockReason.TimeZoneUnavailable => SlotClaimBlockReason.TimeZoneUnavailable,
                     _ => SlotClaimBlockReason.InvalidConfiguration
                 };
-                return SaveHighWaterOrBlock(state, rollback.NewHighestObservedUtc, reason, cancellationToken);
+                return SaveHighWaterOrBlock(loadedState, stateAtNow, reason, cancellationToken, decision: decision);
             }
 
             if (admission.Kind == SlotAdmissionKind.Pending)
             {
-                var saveResult = SaveStateIfChanged(state, state with { HighestObservedUtc = rollback.NewHighestObservedUtc }, cancellationToken);
-                return saveResult
-                    ? new SlotClaimResult(SlotClaimKind.NotEligible, admission.SlotId, FormalSlotStatus.PENDING, null)
-                    : Blocked(SlotClaimBlockReason.StatePersistenceFailed);
+                return SaveResultOrBlock(
+                    loadedState,
+                    stateAtNow,
+                    SlotClaimKind.NotEligible,
+                    null,
+                    admission.SlotId,
+                    FormalSlotStatus.PENDING,
+                    decision,
+                    cancellationToken);
             }
 
             if (admission.Kind == SlotAdmissionKind.Missed)
             {
-                var missedState = state with { HighestObservedUtc = rollback.NewHighestObservedUtc };
+                var missedState = stateAtNow;
                 if (admission.SlotId is not null && admission.Position is not null &&
-                    !state.FormalSlots.Any(record => record.SlotId == admission.SlotId))
+                    !stateAtNow.FormalSlots.Any(record => record.SlotId == admission.SlotId))
                 {
                     if (!StateTransitions.CanTransition(null, FormalSlotStatus.MISSED))
                     {
@@ -134,23 +180,29 @@ public sealed class FormalSlotClaimService
                         FormalSlotStatus.MISSED,
                         nowUtc,
                         "admission-window-expired");
-                    missedState = missedState with { FormalSlots = state.FormalSlots.Append(missedRecord).ToArray() };
+                    missedState = missedState with { FormalSlots = stateAtNow.FormalSlots.Append(missedRecord).ToArray() };
                 }
 
-                return SaveStateIfChanged(state, missedState, cancellationToken)
-                    ? new SlotClaimResult(SlotClaimKind.NotEligible, admission.SlotId, FormalSlotStatus.MISSED, null)
-                    : Blocked(SlotClaimBlockReason.StatePersistenceFailed);
+                return SaveResultOrBlock(
+                    loadedState,
+                    missedState,
+                    SlotClaimKind.NotEligible,
+                    null,
+                    admission.SlotId,
+                    FormalSlotStatus.MISSED,
+                    decision,
+                    cancellationToken);
             }
 
             if (admission.SlotId is null || admission.Position is null)
             {
-                return SaveHighWaterOrBlock(state, rollback.NewHighestObservedUtc, SlotClaimBlockReason.InvalidConfiguration, cancellationToken);
+                return SaveHighWaterOrBlock(loadedState, stateAtNow, SlotClaimBlockReason.InvalidConfiguration, cancellationToken, decision: decision);
             }
 
             var slotId = admission.SlotId;
             var position = admission.Position.Value;
-            var existingIdentity = state.FormalSlots.FirstOrDefault(record => record.SlotId == slotId);
-            var claimedPositionRecord = state.FormalSlots.FirstOrDefault(record =>
+            var existingIdentity = stateAtNow.FormalSlots.FirstOrDefault(record => record.SlotId == slotId);
+            var claimedPositionRecord = stateAtNow.FormalSlots.FirstOrDefault(record =>
                 record.SlotId.LocalDate == slotId.LocalDate &&
                 record.Position == position &&
                 record.Status != FormalSlotStatus.MISSED);
@@ -158,25 +210,26 @@ public sealed class FormalSlotClaimService
             if (existingIdentity is not null || claimedPositionRecord is not null)
             {
                 return SaveHighWaterOrBlock(
-                    state,
-                    rollback.NewHighestObservedUtc,
+                    loadedState,
+                    stateAtNow,
                     SlotClaimBlockReason.InvalidConfigOrState,
                     cancellationToken,
                     SlotClaimKind.AlreadyConsumed,
                     slotId,
-                    existingIdentity?.Status ?? claimedPositionRecord?.Status);
+                    existingIdentity?.Status ?? claimedPositionRecord?.Status,
+                    decision);
             }
 
             if (!StateTransitions.CanTransition(null, FormalSlotStatus.CLAIMED))
             {
-                return SaveHighWaterOrBlock(state, rollback.NewHighestObservedUtc, SlotClaimBlockReason.InvalidConfigOrState, cancellationToken);
+                return SaveHighWaterOrBlock(loadedState, stateAtNow, SlotClaimBlockReason.InvalidConfigOrState, cancellationToken, decision: decision);
             }
 
             var claimedRecord = new FormalSlotRecord(slotId, position, FormalSlotStatus.CLAIMED, nowUtc, null);
-            var claimedState = state with
+            var claimedState = stateAtNow with
             {
-                HighestObservedUtc = rollback.NewHighestObservedUtc,
-                FormalSlots = state.FormalSlots.Append(claimedRecord).ToArray()
+                FormalSlots = stateAtNow.FormalSlots.Append(claimedRecord).ToArray(),
+                Eligibility = stateAtNow.Eligibility! with { HasUnresolvedClaim = true }
             };
 
             if (!TrySaveState(claimedState, cancellationToken))
@@ -186,27 +239,60 @@ public sealed class FormalSlotClaimService
 
             return new SlotClaimResult(SlotClaimKind.Claimed, slotId, FormalSlotStatus.CLAIMED, null)
             {
-                ConfigSnapshot = config
+                ConfigSnapshot = config,
+                EligibilityDecision = decision
             };
         }
     }
 
     private SlotClaimResult SaveHighWaterOrBlock(
         StateDocument originalState,
-        DateTimeOffset? newHighWater,
+        StateDocument updatedState,
         SlotClaimBlockReason blockReason,
         CancellationToken cancellationToken,
         SlotClaimKind resultKind = SlotClaimKind.Blocked,
         SlotId? slotId = null,
-        FormalSlotStatus? status = null)
+        FormalSlotStatus? status = null,
+        EligibilityDecision? decision = null)
     {
-        if (!SaveStateIfChanged(originalState, originalState with { HighestObservedUtc = newHighWater }, cancellationToken))
+        return SaveResultOrBlock(
+            originalState,
+            updatedState,
+            resultKind,
+            resultKind == SlotClaimKind.Blocked ? blockReason : null,
+            slotId,
+            status,
+            decision,
+            cancellationToken);
+    }
+
+    private SlotClaimResult SaveResultOrBlock(
+        StateDocument originalState,
+        StateDocument updatedState,
+        SlotClaimKind resultKind,
+        SlotClaimBlockReason? blockReason,
+        SlotId? slotId,
+        FormalSlotStatus? status,
+        EligibilityDecision? decision,
+        CancellationToken cancellationToken)
+    {
+        if (!SaveStateIfChanged(originalState, updatedState, cancellationToken))
         {
             return Blocked(SlotClaimBlockReason.StatePersistenceFailed);
         }
 
-        return new SlotClaimResult(resultKind, slotId, status, resultKind == SlotClaimKind.Blocked ? blockReason : null);
+        return new SlotClaimResult(resultKind, slotId, status, blockReason)
+        {
+            EligibilityDecision = decision
+        };
     }
+
+    private static StateDocument WithHighWater(StateDocument state, DateTimeOffset? highestObservedUtc) =>
+        state with
+        {
+            HighestObservedUtc = highestObservedUtc,
+            Eligibility = state.Eligibility! with { HighestObservedUtc = highestObservedUtc }
+        };
 
     private bool SaveStateIfChanged(StateDocument originalState, StateDocument updatedState, CancellationToken cancellationToken)
     {

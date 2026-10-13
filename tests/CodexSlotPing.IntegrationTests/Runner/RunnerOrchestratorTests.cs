@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Codex;
 using CodexSlotPing.Core.Concurrency;
 using CodexSlotPing.Core.Configuration;
@@ -27,6 +28,8 @@ public sealed class RunnerOrchestratorTests
         Assert.Equal(RunnerExitCode.ConfirmedSuccess, exitCode);
         var record = Assert.Single(fixture.StateStore.State.FormalSlots);
         Assert.Equal(FormalSlotStatus.CONFIRMED_SUCCESS, record.Status);
+        Assert.NotNull(fixture.StateStore.State.Eligibility!.LastAttemptAtUtc);
+        Assert.NotNull(fixture.StateStore.State.Eligibility.LastConfirmedSuccessAtUtc);
         Assert.True(fixture.Launcher.ClaimedAtLaunch);
         Assert.Equal(1, fixture.Launcher.CallCount);
         Assert.Single(fixture.LogWriter.Entries);
@@ -78,7 +81,8 @@ public sealed class RunnerOrchestratorTests
         var now = AtLocal(TestDate, new TimeOnly(7, 1));
         var state = StateDocument.Empty() with
         {
-            FormalSlots = [Record(TestDate, new TimeOnly(7, 0), 1, FormalSlotStatus.CLAIMED, now)]
+            FormalSlots = [Record(TestDate, new TimeOnly(7, 0), 1, FormalSlotStatus.CLAIMED, now)],
+            Eligibility = EligibilityState.Empty() with { HasUnresolvedClaim = true }
         };
         var fixture = CreateFixture(now, state: state);
 
@@ -157,7 +161,13 @@ public sealed class RunnerOrchestratorTests
     public async Task ClockRollback_BlocksClaimAndLaunch()
     {
         var now = AtLocal(TestDate, new TimeOnly(7, 1));
-        var fixture = CreateFixture(now, state: StateDocument.Empty() with { HighestObservedUtc = now.AddMinutes(1) });
+        var highWater = now.AddMinutes(1);
+        var state = StateDocument.Empty() with
+        {
+            HighestObservedUtc = highWater,
+            Eligibility = EligibilityState.Empty() with { HighestObservedUtc = highWater }
+        };
+        var fixture = CreateFixture(now, state: state);
 
         var exitCode = await fixture.CreateRunner().RunFormalSlotAsync(CancellationToken.None);
 
@@ -214,6 +224,9 @@ public sealed class RunnerOrchestratorTests
 
         Assert.Equal(RunnerExitCode.PrelaunchFailed, exitCode);
         Assert.Equal(FormalSlotStatus.PRELAUNCH_FAILED, Assert.Single(fixture.StateStore.State.FormalSlots).Status);
+        Assert.Null(fixture.StateStore.State.Eligibility!.LastAttemptAtUtc);
+        Assert.DoesNotContain(fixture.StateStore.State.Eligibility.Observations,
+            observation => observation.Kind == EligibilityObservationKind.AttemptStarted);
         Assert.Equal(0, fixture.Launcher.CallCount);
         Assert.Single(fixture.LogWriter.Entries);
     }
@@ -229,6 +242,45 @@ public sealed class RunnerOrchestratorTests
         Assert.Equal(RunnerExitCode.PrelaunchFailed, exitCode);
         Assert.Equal(FormalSlotStatus.PRELAUNCH_FAILED, Assert.Single(fixture.StateStore.State.FormalSlots).Status);
         Assert.Equal(1, fixture.Launcher.CallCount);
+        Assert.Null(fixture.StateStore.State.Eligibility!.LastAttemptAtUtc);
+    }
+
+    [Fact]
+    public async Task UnknownExternalUsage_BlocksRunnerWithoutDispatch()
+    {
+        var fixture = CreateFixture(
+            AtLocal(TestDate, new TimeOnly(7, 1)),
+            state: StateDocument.Empty());
+
+        var exitCode = await fixture.CreateRunner().RunFormalSlotAsync(CancellationToken.None);
+
+        Assert.Equal(RunnerExitCode.NoDispatch, exitCode);
+        Assert.Empty(fixture.StateStore.State.FormalSlots);
+        Assert.Equal(0, fixture.Launcher.CallCount);
+    }
+
+    [Fact]
+    public async Task UsageLimitObservation_BlocksTheNextScheduledRunner()
+    {
+        var now = AtLocal(TestDate, new TimeOnly(7, 1));
+        var state = KnownState() with
+        {
+            Eligibility = KnownState().Eligibility! with
+            {
+                Observations = [new EligibilityObservation(
+                    EligibilityObservationKind.UsageLimitReached,
+                    now.AddMinutes(-1),
+                    ObservationSource.AppScheduled,
+                    Confidence.High)]
+            }
+        };
+        var fixture = CreateFixture(now, state: state);
+
+        var exitCode = await fixture.CreateRunner().RunFormalSlotAsync(CancellationToken.None);
+
+        Assert.Equal(RunnerExitCode.NoDispatch, exitCode);
+        Assert.Empty(fixture.StateStore.State.FormalSlots);
+        Assert.Equal(0, fixture.Launcher.CallCount);
     }
 
     [Fact]
@@ -298,6 +350,11 @@ public sealed class RunnerOrchestratorTests
         CodexInvocationResult? invocationResult = null) =>
         new(nowUtc, config, state, mutexAvailable, invocationResult);
 
+    private static StateDocument KnownState() => StateDocument.Empty() with
+    {
+        Eligibility = EligibilityState.Empty() with { ExternalManualUsageUnknown = false }
+    };
+
     private static DateTimeOffset AtLocal(DateOnly date, TimeOnly time)
     {
         var local = DateTime.SpecifyKind(date.ToDateTime(time), DateTimeKind.Unspecified);
@@ -344,7 +401,7 @@ public sealed class RunnerOrchestratorTests
             TimeZoneProvider = new FixedTimeZoneProvider(EasternTimeZoneId, EasternTimeZone);
             ConfigStore = new InMemoryConfigStore(config ?? AppConfigDefaults.Create() with { TimeZone = EasternTimeZoneId });
             Mutex = new RecordingStateMutex(mutexAvailable);
-            StateStore = new InMemoryStateStore(state ?? StateDocument.Empty(), () => Mutex.IsHeld);
+            StateStore = new InMemoryStateStore(state ?? KnownState(), () => Mutex.IsHeld);
             TaskPath = $"\\CodexSlotPing-Test-{Guid.NewGuid():N}";
             Scheduler = new FakeSchedulerGateway(RunnerOrchestratorTests.CreateSchedulerStatus(TaskPath, _runnerPath, enabled: true));
             EnvironmentDetector = new FakeEnvironmentDetector(ReadyEnvironment(GetFakeCodexPath()));

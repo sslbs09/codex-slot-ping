@@ -3,6 +3,7 @@ using System.Text.Json;
 using CodexSlotPing.Core.Codex;
 using CodexSlotPing.Core.Concurrency;
 using CodexSlotPing.Core.Configuration;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Logging;
 using CodexSlotPing.Core.Persistence;
 using CodexSlotPing.Core.Scheduler;
@@ -60,7 +61,8 @@ public sealed class RunnerOrchestrator
             _configStore,
             _stateStore,
             _stateMutex,
-            new SlotAdmissionEvaluator(_timeZoneProvider));
+            new SlotAdmissionEvaluator(_timeZoneProvider),
+            new EligibilityEvaluator());
     }
 
     public async Task<RunnerExitCode> RunFormalSlotAsync(CancellationToken cancellationToken)
@@ -154,6 +156,7 @@ public sealed class RunnerOrchestrator
 
         var config = claim.ConfigSnapshot;
         CodexInvocationResult invocationResult;
+        DateTimeOffset? attemptStartedAtUtc = null;
         try
         {
             var environment = await _environmentDetector.DetectAsync(cancellationToken).ConfigureAwait(false);
@@ -168,9 +171,15 @@ public sealed class RunnerOrchestrator
             else
             {
                 var childTimeout = RunnerExecutionBudget.GetCodexTimeout(runTimer.Elapsed);
-                invocationResult = childTimeout <= TimeSpan.Zero
-                    ? PrelaunchFailed("runner-time-budget-exhausted")
-                    : await InvokeOnceAsync(environment, config, cancellationToken, childTimeout).ConfigureAwait(false);
+                if (childTimeout <= TimeSpan.Zero)
+                {
+                    invocationResult = PrelaunchFailed("runner-time-budget-exhausted");
+                }
+                else
+                {
+                    attemptStartedAtUtc = _clock.UtcNow.ToUniversalTime();
+                    invocationResult = await InvokeOnceAsync(environment, config, cancellationToken, childTimeout).ConfigureAwait(false);
+                }
             }
         }
         catch (OperationCanceledException)
@@ -183,7 +192,12 @@ public sealed class RunnerOrchestrator
         }
 
         invocationResult = NormalizeResult(invocationResult);
-        var finalized = await FinalizeClaimAsync(claim.SlotId, config, invocationResult).ConfigureAwait(false);
+        if (!invocationResult.ProcessStarted)
+        {
+            attemptStartedAtUtc = null;
+        }
+
+        var finalized = await FinalizeClaimAsync(claim.SlotId, config, invocationResult, attemptStartedAtUtc).ConfigureAwait(false);
         if (!finalized)
         {
             return invocationResult.ProcessStarted
@@ -250,9 +264,15 @@ public sealed class RunnerOrchestrator
         return invocationDirectory;
     }
 
-    private async Task<bool> FinalizeClaimAsync(SlotId slotId, AppConfig config, CodexInvocationResult result)
+    private async Task<bool> FinalizeClaimAsync(
+        SlotId slotId,
+        AppConfig config,
+        CodexInvocationResult result,
+        DateTimeOffset? attemptStartedAtUtc)
     {
-        var stateFinalized = await Task.Run(() => TryFinalizeClaim(slotId, result), CancellationToken.None).ConfigureAwait(false);
+        var stateFinalized = await Task.Run(
+            () => TryFinalizeClaim(slotId, result, attemptStartedAtUtc),
+            CancellationToken.None).ConfigureAwait(false);
         if (!stateFinalized)
         {
             return false;
@@ -284,7 +304,10 @@ public sealed class RunnerOrchestrator
         return true;
     }
 
-    private bool TryFinalizeClaim(SlotId slotId, CodexInvocationResult result)
+    private bool TryFinalizeClaim(
+        SlotId slotId,
+        CodexInvocationResult result,
+        DateTimeOffset? attemptStartedAtUtc)
     {
         StateMutexLease? lease;
         try
@@ -341,7 +364,61 @@ public sealed class RunnerOrchestrator
                     UpdatedAtUtc = _clock.UtcNow.ToUniversalTime(),
                     DiagnosticCategory = result.DiagnosticCategory
                 };
-                _stateStore.SaveAsync(state with { FormalSlots = records }, CancellationToken.None).GetAwaiter().GetResult();
+                var finalizedAtUtc = _clock.UtcNow.ToUniversalTime();
+                var eligibility = state.Eligibility
+                    ?? throw new InvalidDataException("The state document is missing eligibility state.");
+                var observations = eligibility.Observations.ToList();
+                DateTimeOffset? lastAttemptAtUtc = eligibility.LastAttemptAtUtc;
+                DateTimeOffset? lastConfirmedSuccessAtUtc = eligibility.LastConfirmedSuccessAtUtc;
+
+                if (result.ProcessStarted && attemptStartedAtUtc is { } requestStartedAtUtc)
+                {
+                    lastAttemptAtUtc = Later(lastAttemptAtUtc, requestStartedAtUtc);
+                    observations.Add(new EligibilityObservation(
+                        EligibilityObservationKind.AttemptStarted,
+                        requestStartedAtUtc.ToUniversalTime(),
+                        ObservationSource.AppScheduled,
+                        Confidence.High));
+                }
+
+                if (result.ProcessStarted && result.Classification == CodexResultClassification.CONFIRMED_SUCCESS)
+                {
+                    lastConfirmedSuccessAtUtc = Later(lastConfirmedSuccessAtUtc, finalizedAtUtc);
+                    observations.Add(new EligibilityObservation(
+                        EligibilityObservationKind.ConfirmedSuccess,
+                        finalizedAtUtc,
+                        ObservationSource.AppScheduled,
+                        Confidence.High));
+                }
+
+                if (result.ProcessStarted && string.Equals(result.DiagnosticCategory, "usage-limit", StringComparison.OrdinalIgnoreCase))
+                {
+                    observations.Add(new EligibilityObservation(
+                        EligibilityObservationKind.UsageLimitReached,
+                        finalizedAtUtc,
+                        ObservationSource.AppScheduled,
+                        Confidence.High));
+                }
+
+                var highestObservedAtUtc = Later(state.HighestObservedUtc, finalizedAtUtc);
+
+                var finalizedEligibility = eligibility with
+                {
+                    HighestObservedUtc = highestObservedAtUtc,
+                    LastAttemptAtUtc = lastAttemptAtUtc,
+                    LastConfirmedSuccessAtUtc = lastConfirmedSuccessAtUtc,
+                    Observations = observations
+                        .OrderBy(observation => observation.ObservedAtUtc)
+                        .ThenBy(observation => observation.Kind)
+                        .ToArray(),
+                    HasUnresolvedClaim = records.Any(record => record.Status == FormalSlotStatus.CLAIMED)
+                };
+                _stateStore.SaveAsync(state with
+                {
+                    HighestObservedUtc = highestObservedAtUtc,
+                    FormalSlots = records,
+                    Eligibility = finalizedEligibility
+                }, CancellationToken.None).GetAwaiter().GetResult();
                 return true;
             }
             catch (Exception exception) when (IsStorageFailure(exception) || exception is InvalidOperationException)
@@ -349,6 +426,14 @@ public sealed class RunnerOrchestrator
                 return false;
             }
         }
+    }
+
+    private static DateTimeOffset? Later(DateTimeOffset? current, DateTimeOffset candidate)
+    {
+        var utcCandidate = candidate.ToUniversalTime();
+        return current is { } value && value.ToUniversalTime() >= utcCandidate
+            ? value.ToUniversalTime()
+            : utcCandidate;
     }
 
     private int GetLocalOffsetMinutes(DateTimeOffset timestampUtc)

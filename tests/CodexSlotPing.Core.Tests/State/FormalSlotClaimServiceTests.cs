@@ -1,5 +1,6 @@
 using CodexSlotPing.Core.Concurrency;
 using CodexSlotPing.Core.Configuration;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Slots;
 using CodexSlotPing.Core.State;
 using CodexSlotPing.Core.Time;
@@ -27,6 +28,7 @@ public sealed class FormalSlotClaimServiceTests
         Assert.True(fixture.StateStore.SaveObservedMutexHeld);
         Assert.False(fixture.Mutex.IsHeld);
         Assert.Equal(1, fixture.Clock.ReadCount);
+        Assert.Equal(EligibilityStatus.Eligible, result.EligibilityDecision!.Status);
     }
 
     [Fact]
@@ -38,8 +40,9 @@ public sealed class FormalSlotClaimServiceTests
         var second = await fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None);
 
         Assert.Equal(SlotClaimKind.Claimed, first.Kind);
-        Assert.Equal(SlotClaimKind.AlreadyConsumed, second.Kind);
-        Assert.Equal(FormalSlotStatus.CLAIMED, second.Status);
+        Assert.Equal(SlotClaimKind.Blocked, second.Kind);
+        Assert.Equal(EligibilityReason.UnresolvedClaim, second.EligibilityDecision!.Reason);
+        Assert.Null(second.Status);
         Assert.Single(fixture.StateStore.State.FormalSlots);
         Assert.Equal(1, fixture.StateStore.SaveCount);
     }
@@ -59,7 +62,8 @@ public sealed class FormalSlotClaimServiceTests
         var second = await fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None);
 
         Assert.Equal(SlotClaimKind.Claimed, first.Kind);
-        Assert.Equal(SlotClaimKind.AlreadyConsumed, second.Kind);
+        Assert.Equal(SlotClaimKind.Blocked, second.Kind);
+        Assert.Equal(EligibilityReason.UnresolvedClaim, second.EligibilityDecision!.Reason);
         Assert.Single(fixture.StateStore.State.FormalSlots);
         Assert.Equal(new TimeOnly(7, 0), fixture.StateStore.State.FormalSlots[0].SlotId.LocalTime);
     }
@@ -68,7 +72,7 @@ public sealed class FormalSlotClaimServiceTests
     public async Task EditedUnclaimedFutureIdentity_CanBeClaimedAfterOldIdentityWasMissed()
     {
         var date = new DateOnly(2026, 1, 15);
-        var state = StateDocument.Empty() with
+        var state = KnownState() with
         {
             FormalSlots = [Record(date, "07:00", 1, FormalSlotStatus.CONFIRMED_SUCCESS), Record(date, "12:01", 2, FormalSlotStatus.MISSED)]
         };
@@ -145,7 +149,12 @@ public sealed class FormalSlotClaimServiceTests
     public async Task BackwardClockMove_BlocksAndPreservesPersistedHighWaterMark()
     {
         var highWater = new DateTimeOffset(2026, 1, 15, 12, 0, 0, TimeSpan.Zero);
-        var state = StateDocument.Empty() with { HighestObservedUtc = highWater };
+        var knownState = KnownState();
+        var state = knownState with
+        {
+            HighestObservedUtc = highWater,
+            Eligibility = knownState.Eligibility! with { HighestObservedUtc = highWater }
+        };
         var fixture = CreateFixture(highWater.AddMinutes(-1), state: state);
 
         var result = await fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None);
@@ -183,6 +192,60 @@ public sealed class FormalSlotClaimServiceTests
         Assert.Equal(0, fixture.StateStore.SaveCount);
     }
 
+    [Fact]
+    public async Task UnknownExternalUsage_BlocksScheduledClaimAndReturnsCoreDecision()
+    {
+        var fixture = CreateFixture(
+            AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(7, 1)),
+            state: StateDocument.Empty());
+
+        var result = await fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None);
+
+        Assert.Equal(SlotClaimKind.Blocked, result.Kind);
+        Assert.Equal(EligibilityStatus.Unknown, result.EligibilityDecision!.Status);
+        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, result.EligibilityDecision.Reason);
+        Assert.Empty(fixture.StateStore.State.FormalSlots);
+    }
+
+    [Fact]
+    public async Task UsageLimitWithoutTrustedReset_BlocksScheduledClaim()
+    {
+        var now = AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(7, 1));
+        var knownState = KnownState();
+        var state = knownState with
+        {
+            Eligibility = knownState.Eligibility! with
+            {
+                Observations = [new EligibilityObservation(
+                    EligibilityObservationKind.UsageLimitReached,
+                    now.AddMinutes(-1),
+                    ObservationSource.AppScheduled,
+                    Confidence.High)]
+            }
+        };
+        var fixture = CreateFixture(now, state: state);
+
+        var result = await fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None);
+
+        Assert.Equal(SlotClaimKind.Blocked, result.Kind);
+        Assert.Equal(EligibilityReason.UsageLimitWithoutTrustedReset, result.EligibilityDecision!.Reason);
+        Assert.Empty(fixture.StateStore.State.FormalSlots);
+    }
+
+    [Fact]
+    public async Task ConcurrentClaimsForSameSlot_HaveOneWinner()
+    {
+        var fixture = CreateFixture(AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(7, 1)));
+
+        var results = await Task.WhenAll(
+            fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None),
+            fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None));
+
+        Assert.Single(results, result => result.Kind == SlotClaimKind.Claimed);
+        Assert.Single(fixture.StateStore.State.FormalSlots);
+        Assert.Equal(1, fixture.StateStore.SaveCount);
+    }
+
     private static ClaimFixture CreateFixture(
         DateTimeOffset nowUtc,
         AppConfig? config = null,
@@ -193,11 +256,22 @@ public sealed class FormalSlotClaimServiceTests
         var zoneProvider = new FixedTimeZoneProvider(EasternTimeZoneId, EasternTimeZone);
         var configStore = new InMemoryConfigStore(config ?? AppConfigDefaults.Create() with { TimeZone = EasternTimeZoneId });
         var mutex = new RecordingStateMutex(mutexAvailable);
-        var stateStore = new InMemoryStateStore(state ?? StateDocument.Empty(), () => mutex.IsHeld);
-        var evaluator = new SlotAdmissionEvaluator(zoneProvider);
-        var service = new FormalSlotClaimService(clock, zoneProvider, configStore, stateStore, mutex, evaluator);
+        var stateStore = new InMemoryStateStore(state ?? KnownState(), () => mutex.IsHeld);
+        var service = new FormalSlotClaimService(
+            clock,
+            zoneProvider,
+            configStore,
+            stateStore,
+            mutex,
+            new SlotAdmissionEvaluator(zoneProvider),
+            new EligibilityEvaluator());
         return new ClaimFixture(service, clock, configStore, stateStore, mutex);
     }
+
+    private static StateDocument KnownState() => StateDocument.Empty() with
+    {
+        Eligibility = EligibilityState.Empty() with { ExternalManualUsageUnknown = false }
+    };
 
     private static FormalSlotRecord Record(DateOnly date, string time, int position, FormalSlotStatus status) =>
         new(new SlotId(EasternTimeZoneId, date, TimeOnly.Parse(time)), position, status, new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), null);
@@ -298,17 +372,23 @@ public sealed class FormalSlotClaimServiceTests
 
     private sealed class RecordingStateMutex(bool available) : IStateMutex
     {
+        private readonly object _gate = new();
+
         public bool IsHeld { get; private set; }
 
         public StateMutexLease? TryAcquire(TimeSpan timeout)
         {
-            if (!available || IsHeld)
+            if (!available || !Monitor.TryEnter(_gate, timeout))
             {
                 return null;
             }
 
             IsHeld = true;
-            return new StateMutexLease(() => IsHeld = false);
+            return new StateMutexLease(() =>
+            {
+                IsHeld = false;
+                Monitor.Exit(_gate);
+            });
         }
     }
 }
