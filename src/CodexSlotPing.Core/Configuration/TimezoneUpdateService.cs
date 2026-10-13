@@ -1,4 +1,3 @@
-using System.Globalization;
 using CodexSlotPing.Core.Scheduler;
 
 namespace CodexSlotPing.Core.Configuration;
@@ -8,15 +7,18 @@ public sealed class TimezoneUpdateService
     private readonly IConfigStore _configStore;
     private readonly ITaskSchedulerGateway _schedulerGateway;
     private readonly SchedulerHealthEvaluator _healthEvaluator;
+    private readonly SchedulingCoordinator? _schedulingCoordinator;
 
     public TimezoneUpdateService(
         IConfigStore configStore,
         ITaskSchedulerGateway schedulerGateway,
-        SchedulerHealthEvaluator? healthEvaluator = null)
+        SchedulerHealthEvaluator? healthEvaluator = null,
+        SchedulingCoordinator? schedulingCoordinator = null)
     {
         _configStore = configStore ?? throw new ArgumentNullException(nameof(configStore));
         _schedulerGateway = schedulerGateway ?? throw new ArgumentNullException(nameof(schedulerGateway));
         _healthEvaluator = healthEvaluator ?? new SchedulerHealthEvaluator();
+        _schedulingCoordinator = schedulingCoordinator;
     }
 
     public async Task<TimezoneUpdateResult> ApplyAsync(
@@ -34,7 +36,7 @@ public sealed class TimezoneUpdateService
         var currentStatus = await _schedulerGateway.ReadStatusAsync(
             taskPath, currentRunnerPath, config.TimeZone, cancellationToken).ConfigureAwait(false);
         var health = _healthEvaluator.Evaluate(
-            currentStatus, currentRunnerPath, config.TimeZone, currentWindowsTimeZoneId, config.Slots);
+            currentStatus, currentRunnerPath, config.TimeZone, currentWindowsTimeZoneId);
         var timezoneChanged = !string.Equals(config.TimeZone, "SYSTEM", StringComparison.OrdinalIgnoreCase) &&
                               !string.Equals(config.TimeZone, currentWindowsTimeZoneId, StringComparison.OrdinalIgnoreCase);
 
@@ -63,17 +65,15 @@ public sealed class TimezoneUpdateService
             return Failure(config, MarkFailed(health, "owned-task-required"), "owned-task-required", false);
         }
 
-        if (!TryParseSlots(config.Slots, out var slotTimes))
-        {
-            return Failure(config, health, "invalid-slot-definition", false);
-        }
-
         var updatedConfig = config with { TimeZone = currentWindowsTimeZoneId };
+        var plan = _schedulingCoordinator is null
+            ? SchedulePlan.None
+            : (await _schedulingCoordinator.EvaluateAsync(cancellationToken).ConfigureAwait(false)).Plan;
         var definition = new SchedulerTaskDefinition(
             taskPath,
             currentRunnerPath,
             currentWindowsTimeZoneId,
-            slotTimes,
+            plan,
             config.WakeToRun,
             Enabled: currentStatus.IsEnabled);
 
@@ -117,7 +117,7 @@ public sealed class TimezoneUpdateService
         var verifiedStatus = await _schedulerGateway.ReadStatusAsync(
             taskPath, currentRunnerPath, updatedConfig.TimeZone, cancellationToken).ConfigureAwait(false);
         var verifiedHealth = _healthEvaluator.Evaluate(
-            verifiedStatus, currentRunnerPath, updatedConfig.TimeZone, currentWindowsTimeZoneId, updatedConfig.Slots);
+            verifiedStatus, currentRunnerPath, updatedConfig.TimeZone, currentWindowsTimeZoneId, plan);
         if (verifiedHealth.State is not SchedulerState.ON and not SchedulerState.OFF)
         {
             var failedStatus = MarkFailed(verifiedHealth, verifiedHealth.DiagnosticCategory ?? "scheduler-readback-failed");
@@ -145,27 +145,4 @@ public sealed class TimezoneUpdateService
         return status with { State = SchedulerState.ERROR, DiagnosticCategory = diagnosticCategory };
     }
 
-    private static bool TryParseSlots(IReadOnlyList<string>? slots, out IReadOnlyList<TimeOnly> times)
-    {
-        var parsed = new List<TimeOnly>(4);
-        if (slots is null || slots.Count != 4)
-        {
-            times = Array.Empty<TimeOnly>();
-            return false;
-        }
-
-        foreach (var slot in slots)
-        {
-            if (!TimeOnly.TryParseExact(slot, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var time))
-            {
-                times = Array.Empty<TimeOnly>();
-                return false;
-            }
-
-            parsed.Add(time);
-        }
-
-        times = parsed;
-        return parsed.Distinct().Count() == 4;
-    }
 }

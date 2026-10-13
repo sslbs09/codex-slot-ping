@@ -4,7 +4,6 @@ public sealed record SchedulerTaskDefinition(
     string TaskPath,
     string RunnerPath,
     string ConfiguredTimeZoneId,
-    IReadOnlyList<TimeOnly> SlotTimes,
+    SchedulePlan SchedulePlan,
     bool WakeToRun,
-    DateOnly? StartBoundaryDate = null,
     bool Enabled = true);

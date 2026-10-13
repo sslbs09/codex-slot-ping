@@ -104,14 +104,14 @@ public sealed class AtomicJsonFileTests
 
         var defaults = AppConfigDefaults.Create();
         Assert.Equal(defaults.SchemaVersion, created.SchemaVersion);
-        Assert.Equal(defaults.Slots, created.Slots);
+        Assert.Equal(defaults.LegacyFixedSlots, created.LegacyFixedSlots);
         Assert.Equal(defaults.TimeZone, created.TimeZone);
         Assert.Equal(defaults.Model, created.Model);
         Assert.Equal(defaults.ReasoningEffort, created.ReasoningEffort);
         Assert.Equal(defaults.Prompt, created.Prompt);
         Assert.True(File.Exists(path));
         var loadedDefaults = await store.LoadOrCreateAsync(CancellationToken.None);
-        Assert.Equal(created.Slots.ToArray(), loadedDefaults.Slots.ToArray());
+        Assert.Equal(created.LegacyFixedSlots.ToArray(), loadedDefaults.LegacyFixedSlots.ToArray());
         Assert.Equal(created.Model, loadedDefaults.Model);
 
         const string malformed = "{\"schemaVersion\":1,";
@@ -124,10 +124,36 @@ public sealed class AtomicJsonFileTests
         await Assert.ThrowsAsync<InvalidDataException>(() => store.LoadOrCreateAsync(CancellationToken.None));
         Assert.Equal(partial, await File.ReadAllTextAsync(path));
 
-        const string unsupported = "{\"schemaVersion\":2,\"enabled\":true,\"slots\":[\"07:00\",\"12:01\",\"17:01\",\"22:01\"],\"timeZone\":\"SYSTEM\",\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"low\",\"prompt\":\"Hi.\",\"wakeToRun\":false,\"strictSlotWindowMinutes\":3,\"captureRawLogs\":false}";
+        const string unsupported = "{\"schemaVersion\":3,\"enabled\":true,\"legacyFixedSlots\":[\"07:00\",\"12:01\",\"17:01\",\"22:01\"],\"timeZone\":\"SYSTEM\",\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"low\",\"prompt\":\"Hi.\",\"wakeToRun\":false,\"strictSlotWindowMinutes\":3,\"captureRawLogs\":false}";
         await File.WriteAllTextAsync(path, unsupported);
         await Assert.ThrowsAsync<InvalidDataException>(() => store.LoadOrCreateAsync(CancellationToken.None));
         Assert.Equal(unsupported, await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task V1Config_MigratesFixedSlotsAndPreservesOtherSettings()
+    {
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "config.json");
+        var json = new AtomicJsonFile(new RecordingAtomicFileOperations());
+        var store = new JsonConfigStore(json, path);
+        const string legacy = "{\"schemaVersion\":1,\"enabled\":false,\"slots\":[\"07:00\",\"12:01\",\"17:01\",\"22:01\"],\"timeZone\":\"SYSTEM\",\"model\":\"gpt-5.6-sol\",\"reasoningEffort\":\"medium\",\"prompt\":\"Keep this\",\"wakeToRun\":true,\"strictSlotWindowMinutes\":3,\"captureRawLogs\":true}";
+        await File.WriteAllTextAsync(path, legacy);
+
+        var migrated = await store.LoadOrCreateAsync(CancellationToken.None);
+        var persisted = await File.ReadAllTextAsync(path);
+
+        Assert.Equal(2, migrated.SchemaVersion);
+        Assert.Equal(new[] { "07:00", "12:01", "17:01", "22:01" }, migrated.LegacyFixedSlots);
+        Assert.Null(migrated.Slots);
+        Assert.False(migrated.Enabled);
+        Assert.Equal("gpt-5.6-sol", migrated.Model);
+        Assert.Equal("medium", migrated.ReasoningEffort);
+        Assert.Equal("Keep this", migrated.Prompt);
+        Assert.True(migrated.WakeToRun);
+        Assert.True(migrated.CaptureRawLogs);
+        Assert.Contains("\"legacyFixedSlots\"", persisted, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"slots\"", persisted, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -12,13 +12,13 @@
   <data name="Main.LoginNotConfirmed" xml:space="preserve"><value>尚未确认 ChatGPT 登录状态</value></data>
   <data name="Main.LoginUnknown" xml:space="preserve"><value>无法确认登录状态</value></data>
   <data name="Main.CliVersionUnavailable" xml:space="preserve"><value>无法读取 Codex CLI 版本</value></data>
-  <data name="Main.NextSlot" xml:space="preserve"><value>下个时段</value></data>
-  <data name="Main.WaitingForSchedule" xml:space="preserve"><value>等待计划时段</value></data>
-  <data name="Main.UpdateTimezoneForNext" xml:space="preserve"><value>更新时区锁后才能计算下个时段。</value></data>
-  <data name="Main.NoEligibleFutureSlot" xml:space="preserve"><value>没有可用的未来时段。</value></data>
-  <data name="Main.AdmissionWindowClosesIn" xml:space="preserve"><value>执行窗口将在 {0} 后关闭</value></data>
+  <data name="Main.NextSlot" xml:space="preserve"><value>下次计划尝试</value></data>
+  <data name="Main.WaitingForSchedule" xml:space="preserve"><value>等待计划任务</value></data>
+  <data name="Main.UpdateTimezoneForNext" xml:space="preserve"><value>更新时区锁后才能计算下次计划尝试。</value></data>
+  <data name="Main.NoPlannedAttempt" xml:space="preserve"><value>当前没有计划尝试时间。</value></data>
+  <data name="Main.AttemptPlannedNow" xml:space="preserve"><value>依据本地调度策略。</value></data>
   <data name="Main.StartsIn" xml:space="preserve"><value>将在 {0} 后开始</value></data>
-  <data name="Main.Today" xml:space="preserve"><value>今天</value></data>
+  <data name="Main.Today" xml:space="preserve"><value>旧固定时段</value></data>
   <data name="Main.Model" xml:space="preserve"><value>模型</value></data>
   <data name="Main.Reasoning" xml:space="preserve"><value>推理强度</value></data>
   <data name="Main.Scheduler" xml:space="preserve"><value>计划任务</value></data>
@@ -28,7 +28,7 @@
   <data name="Main.TestNow" xml:space="preserve"><value>立即测试</value></data>
   <data name="Main.Settings" xml:space="preserve"><value>设置</value></data>
   <data name="Main.OpenLogs" xml:space="preserve"><value>打开日志</value></data>
-  <data name="Main.StrictSlot" xml:space="preserve"><value>严格时段 · 错过的时段不会补发。</value></data>
+  <data name="Main.StrictSlot" xml:space="preserve"><value>计划任务只负责唤醒 Runner；Core 会再次检查 eligibility。</value></data>
   <data name="Main.OpenSettingHint" xml:space="preserve"><value>打开对应设置</value></data>
   <data name="Main.OfficialCliInstructions" xml:space="preserve"><value>安装官方 Codex CLI：npm install -g @openai/codex&#xD;&#xA;然后使用 ChatGPT 账户登录：codex login</value></data>
   <data name="Main.StatusRefreshFailed" xml:space="preserve"><value>刷新状态失败：{0}</value></data>
@@ -126,15 +126,15 @@
   <data name="Settings.WindowTitle" xml:space="preserve"><value>Codex Slot Ping 设置</value></data>
   <data name="Settings.Header" xml:space="preserve"><value>设置</value></data>
   <data name="Settings.SectionTitle" xml:space="preserve"><value>调度与请求</value></data>
-  <data name="Settings.FourLocalTimes" xml:space="preserve"><value>四个本地时段（24 小时制 HH:mm）</value></data>
+  <data name="Settings.FourLocalTimes" xml:space="preserve"><value>旧固定时段（仅供诊断，24 小时制 HH:mm；不参与调度）</value></data>
   <data name="Settings.ModelRequest" xml:space="preserve"><value>模型选择请求</value></data>
   <data name="Settings.ReasoningSupport" xml:space="preserve"><value>当前 CLI 支持的推理强度</value></data>
-  <data name="Settings.PromptLabel" xml:space="preserve"><value>每个正式时段和“立即测试”发送的提示词</value></data>
+  <data name="Settings.PromptLabel" xml:space="preserve"><value>计划尝试和“立即测试”发送的提示词</value></data>
   <data name="Settings.TimezoneBehavior" xml:space="preserve"><value>时区行为</value></data>
   <data name="Settings.SystemTimezoneDescription" xml:space="preserve"><value>“跟随系统”会使用 Windows 时区。锁定的时区必须与当前 Windows 时区一致。</value></data>
   <data name="Settings.TimezoneSystem" xml:space="preserve"><value>跟随系统</value></data>
   <data name="Settings.ConfirmTimezone" xml:space="preserve"><value>确认当前时区并更新计划任务</value></data>
-  <data name="Settings.WakeComputer" xml:space="preserve"><value>在计划时段唤醒电脑</value></data>
+  <data name="Settings.WakeComputer" xml:space="preserve"><value>为计划尝试唤醒电脑</value></data>
   <data name="Settings.RawLogs" xml:space="preserve"><value>在本地保存 Codex 原始输出（保留 14 天）</value></data>
   <data name="Settings.RawLogsExplanation" xml:space="preserve"><value>原始输出可能包含 Codex 回复。文件保存在本地日志目录，并会在 14 天后删除。</value></data>
   <data name="Settings.Save" xml:space="preserve"><value>保存设置</value></data>
@@ -142,10 +142,10 @@
   <data name="Settings.DisableScheduler" xml:space="preserve"><value>禁用计划任务</value></data>
   <data name="Settings.RemoveScheduler" xml:space="preserve"><value>删除计划任务</value></data>
   <data name="Settings.Close" xml:space="preserve"><value>关闭</value></data>
-  <data name="Settings.SchedulerWarning" xml:space="preserve"><value>安装后会创建四个本地时间触发器。每个符合条件的触发器都可能向 Codex 发送已配置的提示词，并计入使用额度。</value></data>
+  <data name="Settings.SchedulerWarning" xml:space="preserve"><value>Windows Scheduler 只在一个计划时间唤醒 Runner。发送 Codex 请求前，Runner 会重新检查 Core eligibility。</value></data>
   <data name="Settings.Saved" xml:space="preserve"><value>设置已保存。</value></data>
   <data name="Settings.InstallConfirmTitle" xml:space="preserve"><value>确认安装计划任务</value></data>
-  <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>这会创建或更新本应用拥有的 Windows 计划任务。每个符合条件的时段都会向 Codex 发送已配置的提示词，并可能计入使用额度。是否继续？</value></data>
+  <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>这会创建或更新本应用拥有的 Windows 计划任务。本地策略允许尝试时，任务会唤醒 Runner；Runner 会再次检查 eligibility，然后才向 Codex 发送已配置的提示词。是否继续？</value></data>
   <data name="Settings.InstallSuccess" xml:space="preserve"><value>计划任务已安装，回读状态为已启用。</value></data>
   <data name="Settings.DisableConfirmTitle" xml:space="preserve"><value>禁用计划任务</value></data>
   <data name="Settings.DisableConfirmBody" xml:space="preserve"><value>要禁用本应用拥有的 Codex Slot Ping 计划任务吗？</value></data>
@@ -165,7 +165,7 @@
   <data name="Exit.PreferenceSaveFailed" xml:space="preserve"><value>应用仍会退出，但无法保存此偏好设置：{0}</value></data>
   <data name="Exit.WarningTitle" xml:space="preserve"><value>Codex Slot Ping 正在运行计划任务</value></data>
   <data name="Exit.SuppressWarning" xml:space="preserve"><value>不再显示此提醒</value></data>
-  <data name="Exit.Warning" xml:space="preserve"><value>关闭 Codex Slot Ping 不会停用计划时段。</value></data>
+  <data name="Exit.Warning" xml:space="preserve"><value>关闭 Codex Slot Ping 不会停用计划尝试。</value></data>
   <data name="Exit.Explanation" xml:space="preserve"><value>计划任务独立于此窗口运行。退出只会关闭应用。</value></data>
   <data name="Exit.ExitApp" xml:space="preserve"><value>退出应用</value></data>
   <data name="Exit.Cancel" xml:space="preserve"><value>取消</value></data>

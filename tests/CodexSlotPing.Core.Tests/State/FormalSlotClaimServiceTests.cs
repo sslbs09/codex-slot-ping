@@ -33,6 +33,36 @@ public sealed class FormalSlotClaimServiceTests
     }
 
     [Fact]
+    public async Task ScheduledAttemptClaim_DoesNotRequireALegacyFixedSlotWindow()
+    {
+        var nowUtc = AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(13, 37, 12));
+        var fixture = CreateFixture(nowUtc);
+
+        var result = await fixture.Service.TryClaimScheduledAttemptAsync(CancellationToken.None);
+
+        Assert.True(result.IsClaimed);
+        Assert.Equal(0, fixture.StateStore.State.FormalSlots[0].Position);
+        Assert.Equal(new TimeOnly(13, 37, 12), result.SlotId!.LocalTime);
+        Assert.Equal(EligibilityStatus.Eligible, result.EligibilityDecision!.Status);
+        Assert.True(fixture.StateStore.SaveObservedMutexHeld);
+    }
+
+    [Fact]
+    public async Task ConcurrentScheduledAttemptClaims_HaveOneWinner()
+    {
+        var fixture = CreateFixture(AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(13, 37, 12)));
+
+        var results = await Task.WhenAll(
+            fixture.Service.TryClaimScheduledAttemptAsync(CancellationToken.None),
+            fixture.Service.TryClaimScheduledAttemptAsync(CancellationToken.None));
+
+        Assert.Single(results, result => result.IsClaimed);
+        Assert.Single(results, result => result.EligibilityDecision?.Reason == EligibilityReason.UnresolvedClaim);
+        Assert.Single(fixture.StateStore.State.FormalSlots);
+        Assert.Equal(0, Assert.Single(fixture.StateStore.State.FormalSlots).Position);
+    }
+
+    [Fact]
     public async Task SecondClaimForTheSameIdentity_IsRejected()
     {
         var fixture = CreateFixture(AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(7, 1)));
@@ -56,7 +86,7 @@ public sealed class FormalSlotClaimServiceTests
         fixture.ConfigStore.Config = AppConfigDefaults.Create() with
         {
             TimeZone = EasternTimeZoneId,
-            Slots = ["08:00", "12:01", "17:01", "22:01"]
+            LegacyFixedSlots = ["08:00", "12:01", "17:01", "22:01"]
         };
         fixture.Clock.Now = AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(8, 1));
 
@@ -80,7 +110,7 @@ public sealed class FormalSlotClaimServiceTests
         var config = AppConfigDefaults.Create() with
         {
             TimeZone = EasternTimeZoneId,
-            Slots = ["07:00", "12:10", "17:01", "22:01"]
+            LegacyFixedSlots = ["07:00", "12:10", "17:01", "22:01"]
         };
         var fixture = CreateFixture(AtLocal(date, new TimeOnly(12, 10)), config, state);
 

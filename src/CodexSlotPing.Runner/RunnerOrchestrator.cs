@@ -29,6 +29,7 @@ public sealed class RunnerOrchestrator
     private readonly IStructuredLogWriter _structuredLogWriter;
     private readonly FormalSlotClaimService _claimService;
     private readonly SchedulerHealthEvaluator _schedulerHealthEvaluator = new();
+    private readonly SchedulingCoordinator _schedulingCoordinator;
 
     public RunnerOrchestrator(
         RunnerOptions options,
@@ -64,6 +65,7 @@ public sealed class RunnerOrchestrator
             _stateMutex,
             new SlotAdmissionEvaluator(_timeZoneProvider),
             new EligibilityEvaluator());
+        _schedulingCoordinator = new SchedulingCoordinator(_clock, _claimService);
     }
 
     public async Task<RunnerExitCode> RunFormalSlotAsync(CancellationToken cancellationToken)
@@ -123,8 +125,7 @@ public sealed class RunnerOrchestrator
                 schedulerStatus,
                 _currentRunnerPath,
                 preflightConfig.TimeZone,
-                currentWindowsTimeZoneId,
-                preflightConfig.Slots);
+                currentWindowsTimeZoneId);
         }
         catch (ArgumentException)
         {
@@ -139,7 +140,7 @@ public sealed class RunnerOrchestrator
         SlotClaimResult claim;
         try
         {
-            claim = await _claimService.TryClaimCurrentSlotAsync(cancellationToken).ConfigureAwait(false);
+            claim = await _claimService.TryClaimScheduledAttemptAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -152,6 +153,15 @@ public sealed class RunnerOrchestrator
 
         if (!claim.IsClaimed || claim.SlotId is null || claim.ConfigSnapshot is null)
         {
+            if (claim.EligibilityDecision is { Reason: not EligibilityReason.UnresolvedClaim } blockedDecision &&
+                claim.BlockReason is not SlotClaimBlockReason.MutexUnavailable and not SlotClaimBlockReason.StatePersistenceFailed)
+            {
+                await UpdateOneShotScheduleAsync(
+                    preflightConfig,
+                    SchedulingCoordinator.CreatePlan(blockedDecision, _clock.UtcNow),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             return RunnerExitCode.NoDispatch;
         }
 
@@ -206,7 +216,44 @@ public sealed class RunnerOrchestrator
                 : RunnerExitCode.PrelaunchFailed;
         }
 
+        if (invocationResult.ProcessStarted)
+        {
+            var scheduling = await _schedulingCoordinator.EvaluateAsync(CancellationToken.None).ConfigureAwait(false);
+            await UpdateOneShotScheduleAsync(config, scheduling.Plan, CancellationToken.None).ConfigureAwait(false);
+        }
+
         return ToExitCode(invocationResult.Classification);
+    }
+
+    private async Task UpdateOneShotScheduleAsync(
+        AppConfig config,
+        SchedulePlan plan,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var currentZoneId = _timeZoneProvider.CurrentWindowsTimeZoneId;
+            var raw = await _taskSchedulerGateway.ReadStatusAsync(
+                _options.TaskPath, _currentRunnerPath, config.TimeZone, cancellationToken).ConfigureAwait(false);
+            var health = _schedulerHealthEvaluator.Evaluate(
+                raw, _currentRunnerPath, config.TimeZone, currentZoneId);
+            if (health.State != SchedulerState.ON || !health.Exists || !health.IsOwned || !health.IsEnabled)
+            {
+                return;
+            }
+
+            await _taskSchedulerGateway.InstallOrUpdateAsync(new SchedulerTaskDefinition(
+                _options.TaskPath,
+                _currentRunnerPath,
+                config.TimeZone,
+                plan,
+                config.WakeToRun,
+                Enabled: true), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
+        {
+            // The Codex result remains terminal; a failed re-arm is surfaced by scheduler readback in the UI.
+        }
     }
 
     private async Task<CodexInvocationResult> InvokeOnceAsync(

@@ -57,13 +57,21 @@ public sealed class JsonStateStore : IStateStore
             if (record is null ||
                 record.SlotId is null ||
                 string.IsNullOrWhiteSpace(record.SlotId.WindowsTimeZoneId) ||
-                record.Position is < 1 or > 4 ||
+                record.Position is < 0 or > 4 ||
                 !Enum.IsDefined(record.Status) ||
                 record.Status == FormalSlotStatus.PENDING ||
                 !seenSlotIds.Add(record.SlotId))
             {
                 throw new InvalidDataException("The state document contains an invalid formal slot record.");
             }
+        }
+
+        var fixedPositionRecords = state.FormalSlots.Where(record => record.Position > 0).ToArray();
+        if (fixedPositionRecords
+            .GroupBy(record => (record.SlotId.WindowsTimeZoneId, record.SlotId.LocalDate, record.Position))
+            .Any(group => group.Count() > 1))
+        {
+            throw new InvalidDataException("The state document contains duplicate legacy slot positions.");
         }
 
         if (state.LastTest is { } lastTest &&

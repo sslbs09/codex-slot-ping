@@ -23,6 +23,7 @@ public sealed record AppScreenState(
     SchedulerStatus Scheduler,
     SlotScheduleEntry? NextSlot,
     IReadOnlyList<TodaySlotState> TodaySlots,
+    SchedulePlan SchedulePlan,
     EligibilityDecision EligibilityDecision,
     DateTimeOffset NowUtc,
     string CurrentWindowsTimeZoneId,
@@ -52,6 +53,7 @@ public sealed class AppController
     private readonly Func<string, CancellationToken, Task<TestNowRunResponse>> _runTestNow;
     private readonly string _logsDirectory;
     private readonly NextSlotCalculator _nextSlotCalculator;
+    private readonly SchedulingCoordinator _schedulingCoordinator;
     private readonly SchedulerHealthEvaluator _schedulerHealthEvaluator = new();
     private readonly TimezoneUpdateService _timezoneUpdateService;
     private int _testNowActive;
@@ -81,7 +83,9 @@ public sealed class AppController
         ArgumentException.ThrowIfNullOrWhiteSpace(logsDirectory);
         _logsDirectory = Path.GetFullPath(logsDirectory);
         _nextSlotCalculator = new NextSlotCalculator(_timeZoneProvider);
-        _timezoneUpdateService = new TimezoneUpdateService(_configStore, _schedulerGateway, _schedulerHealthEvaluator);
+        _schedulingCoordinator = new SchedulingCoordinator(_clock, _claimService);
+        _timezoneUpdateService = new TimezoneUpdateService(
+            _configStore, _schedulerGateway, _schedulerHealthEvaluator, _schedulingCoordinator);
     }
 
     public static AppController CreateDefault(string? appBaseDirectory = null)
@@ -124,9 +128,9 @@ public sealed class AppController
         var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
         var persistentState = await _stateStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         var currentTimeZoneId = _timeZoneProvider.CurrentWindowsTimeZoneId;
-        var now = _clock.UtcNow.ToUniversalTime();
-        var eligibilityDecision = await _claimService.GetEligibilityDecisionAsync(
-            EligibilityRequest.Scheduled(now), cancellationToken).ConfigureAwait(false);
+        var scheduling = await _schedulingCoordinator.EvaluateAsync(cancellationToken).ConfigureAwait(false);
+        var now = scheduling.EvaluatedAtUtc;
+        var eligibilityDecision = scheduling.EligibilityDecision;
         var environment = await _environmentDetector.DetectAsync(cancellationToken).ConfigureAwait(false);
         var rawScheduler = await _schedulerGateway.ReadStatusAsync(
             SchedulerTaskContract.ProductionTaskPath,
@@ -134,11 +138,14 @@ public sealed class AppController
             config.TimeZone,
             cancellationToken).ConfigureAwait(false);
         var scheduler = _schedulerHealthEvaluator.Evaluate(rawScheduler, _runnerPath, config.TimeZone,
-            currentTimeZoneId, config.Slots);
+            currentTimeZoneId, scheduling.Plan);
+        scheduler = await ReconcilePlanDriftAsync(
+            config, scheduling.Plan, scheduler, currentTimeZoneId, cancellationToken).ConfigureAwait(false);
         var nextSlot = _nextSlotCalculator.GetNext(config, persistentState, now, currentTimeZoneId);
         var todaySlots = BuildTodaySlots(config, persistentState, now, currentTimeZoneId);
 
         return new AppScreenState(config, persistentState, environment, scheduler, nextSlot, todaySlots,
+            scheduling.Plan,
             eligibilityDecision,
             now, currentTimeZoneId, _logsDirectory);
     }
@@ -166,7 +173,7 @@ public sealed class AppController
                 savedConfig.TimeZone,
                 cancellationToken).ConfigureAwait(false);
             status = _schedulerHealthEvaluator.Evaluate(rawStatus, _runnerPath, savedConfig.TimeZone,
-                currentTimeZoneId, savedConfig.Slots);
+                currentTimeZoneId);
         }
         catch (OperationCanceledException)
         {
@@ -204,7 +211,8 @@ public sealed class AppController
             return new ConfigSaveResult(true, Array.Empty<string>(), status, true);
         }
 
-        var definition = CreateDefinition(configToSave, enabled: status.IsEnabled);
+        var scheduling = await _schedulingCoordinator.EvaluateAsync(cancellationToken).ConfigureAwait(false);
+        var definition = CreateDefinition(configToSave, enabled: status.IsEnabled, scheduling.Plan);
         SchedulerOperationResult update;
         try
         {
@@ -228,7 +236,8 @@ public sealed class AppController
                 true);
         }
 
-        var verified = await ReadHealthySchedulerAsync(configToSave, currentTimeZoneId, cancellationToken).ConfigureAwait(false);
+        var verified = await ReadHealthySchedulerAsync(
+            configToSave, currentTimeZoneId, cancellationToken, definition.SchedulePlan).ConfigureAwait(false);
         if (verified.State is not SchedulerState.ON and not SchedulerState.OFF)
         {
             return new ConfigSaveResult(false,
@@ -261,11 +270,13 @@ public sealed class AppController
         }
 
         var installConfig = validation.NormalizedConfig with { Enabled = true };
+        var scheduling = await _schedulingCoordinator.EvaluateAsync(cancellationToken).ConfigureAwait(false);
+        var definition = CreateDefinition(installConfig, enabled: true, scheduling.Plan);
         SchedulerOperationResult operation;
         try
         {
             operation = await _schedulerGateway.InstallOrUpdateAsync(
-                CreateDefinition(installConfig, enabled: true), cancellationToken).ConfigureAwait(false);
+                definition, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -282,7 +293,8 @@ public sealed class AppController
         }
 
         await _configStore.SaveAsync(installConfig, cancellationToken).ConfigureAwait(false);
-        var readback = await ReadHealthySchedulerAsync(installConfig, currentTimeZoneId, cancellationToken).ConfigureAwait(false);
+        var readback = await ReadHealthySchedulerAsync(
+            installConfig, currentTimeZoneId, cancellationToken, definition.SchedulePlan).ConfigureAwait(false);
         return readback.State == SchedulerState.ON
             ? new SchedulerOperationResult(true, null, readback)
             : new SchedulerOperationResult(false, readback.DiagnosticCategory ?? "scheduler-readback-failed", readback);
@@ -383,7 +395,7 @@ public sealed class AppController
         }
 
         var health = _schedulerHealthEvaluator.Evaluate(currentStatus, _runnerPath, config.TimeZone,
-            currentTimeZoneId, config.Slots);
+            currentTimeZoneId);
         if (!userConfirmed)
         {
             return new TimezoneUpdateResult(TimezoneUpdateState.TIMEZONE_CHANGED, config, health,
@@ -400,7 +412,8 @@ public sealed class AppController
     private async Task<SchedulerStatus> ReadHealthySchedulerAsync(
         AppConfig config,
         string currentTimeZoneId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SchedulePlan? expectedPlan = null)
     {
         var raw = await _schedulerGateway.ReadStatusAsync(
             SchedulerTaskContract.ProductionTaskPath,
@@ -408,22 +421,64 @@ public sealed class AppController
             config.TimeZone,
             cancellationToken).ConfigureAwait(false);
         return _schedulerHealthEvaluator.Evaluate(raw, _runnerPath, config.TimeZone,
-            currentTimeZoneId, config.Slots);
+            currentTimeZoneId, expectedPlan);
     }
 
-    private SchedulerTaskDefinition CreateDefinition(AppConfig config, bool enabled)
-    {
-        var times = config.Slots
-            .Select(slot => TimeOnly.ParseExact(slot, "HH:mm", CultureInfo.InvariantCulture))
-            .OrderBy(time => time)
-            .ToArray();
-        return new SchedulerTaskDefinition(
+    private SchedulerTaskDefinition CreateDefinition(AppConfig config, bool enabled, SchedulePlan schedulePlan) =>
+        new(
             SchedulerTaskContract.ProductionTaskPath,
             _runnerPath,
             config.TimeZone,
-            times,
+            schedulePlan,
             config.WakeToRun,
             Enabled: enabled);
+
+    private async Task<SchedulerStatus> ReconcilePlanDriftAsync(
+        AppConfig config,
+        SchedulePlan plan,
+        SchedulerStatus status,
+        string currentWindowsTimeZoneId,
+        CancellationToken cancellationToken)
+    {
+        string[] scheduleMismatchCodes = [
+            "trigger-plan-mismatch",
+            "trigger-contract-mismatch",
+            "start-when-available-disabled"];
+        if (!status.Exists || !status.IsOwned || status.ContractMismatches.Count == 0 ||
+            status.ContractMismatches.Any(code => !scheduleMismatchCodes.Contains(code, StringComparer.Ordinal)))
+        {
+            return status;
+        }
+
+        try
+        {
+            var update = await _schedulerGateway.InstallOrUpdateAsync(
+                CreateDefinition(config, status.IsEnabled, plan), cancellationToken).ConfigureAwait(false);
+            if (!update.Succeeded)
+            {
+                return update.Status ?? status with
+                {
+                    State = SchedulerState.ERROR,
+                    DiagnosticCategory = update.DiagnosticCategory ?? "scheduler-update-failed"
+                };
+            }
+
+            var raw = await _schedulerGateway.ReadStatusAsync(
+                SchedulerTaskContract.ProductionTaskPath,
+                _runnerPath,
+                config.TimeZone,
+                cancellationToken).ConfigureAwait(false);
+            return _schedulerHealthEvaluator.Evaluate(
+                raw, _runnerPath, config.TimeZone, currentWindowsTimeZoneId, plan);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return status with { State = SchedulerState.ERROR, DiagnosticCategory = "scheduler-update-failed" };
+        }
     }
 
     private IReadOnlyList<TodaySlotState> BuildTodaySlots(
@@ -447,7 +502,7 @@ public sealed class AppController
             .Where(record => record.SlotId.LocalDate == today &&
                              string.Equals(record.SlotId.WindowsTimeZoneId, currentWindowsTimeZoneId, StringComparison.OrdinalIgnoreCase))
             .ToDictionary(record => record.SlotId);
-        return config.Slots
+        return config.LegacyFixedSlots
             .Select(slot => TimeOnly.ParseExact(slot, "HH:mm", CultureInfo.InvariantCulture))
             .OrderBy(time => time)
             .Select((time, index) => new TodaySlotState(

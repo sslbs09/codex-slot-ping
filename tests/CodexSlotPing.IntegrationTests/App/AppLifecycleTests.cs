@@ -25,7 +25,7 @@ public sealed class AppLifecycleTests
     [Fact]
     public void ActiveSchedulerExitWarning_IsClearAndOnlyShownWhenNotSuppressed()
     {
-        Assert.Equal("Closing Codex Slot Ping does not disable scheduled slots.", AppExitPolicy.ExitWarning);
+        Assert.Equal("Closing Codex Slot Ping does not disable planned attempts.", AppExitPolicy.ExitWarning);
         Assert.True(AppExitPolicy.ShouldShowWarning(schedulerOn: true, suppressed: false));
         Assert.False(AppExitPolicy.ShouldShowWarning(schedulerOn: false, suppressed: false));
         Assert.False(AppExitPolicy.ShouldShowWarning(schedulerOn: true, suppressed: true));
@@ -268,7 +268,15 @@ public sealed class AppLifecycleTests
             Definitions.Add(definition);
             Status = OwnedStatus(definition.Enabled) with
             {
-                Readback = Status.Readback! with { WakeToRun = definition.WakeToRun }
+                Readback = Status.Readback! with
+                {
+                    WakeToRun = definition.WakeToRun,
+                    Triggers = definition.SchedulePlan.OneShotTriggerAtUtc is { } at
+                        ? [new SchedulerTriggerReadback(1, false, true, 0,
+                            at.ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz"),
+                            at.AddDays(3650).ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz"))]
+                        : Array.Empty<SchedulerTriggerReadback>()
+                }
             };
             return Task.FromResult(new SchedulerOperationResult(true, null, Status));
         }

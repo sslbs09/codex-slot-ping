@@ -24,22 +24,61 @@ public sealed class RunnerOrchestratorTests
     private static readonly DateOnly TestDate = new(2026, 1, 15);
 
     [Fact]
-    public async Task EligibleSlot_PersistsClaimBeforeLaunch_AndFinalizesSuccess()
+    public async Task EligibleAttemptOutsideLegacySlots_PersistsClaimBeforeLaunch_AndFinalizesSuccess()
     {
-        var fixture = CreateFixture(AtLocal(TestDate, new TimeOnly(7, 1)));
+        var fixture = CreateFixture(AtLocal(TestDate, new TimeOnly(13, 37, 12)));
 
         var exitCode = await fixture.CreateRunner().RunFormalSlotAsync(CancellationToken.None);
 
         Assert.Equal(RunnerExitCode.ConfirmedSuccess, exitCode);
         var record = Assert.Single(fixture.StateStore.State.FormalSlots);
+        Assert.Equal(0, record.Position);
         Assert.Equal(FormalSlotStatus.CONFIRMED_SUCCESS, record.Status);
         Assert.NotNull(fixture.StateStore.State.Eligibility!.LastAttemptAtUtc);
         Assert.NotNull(fixture.StateStore.State.Eligibility.LastConfirmedSuccessAtUtc);
+        var nextDefinition = Assert.Single(fixture.Scheduler.Definitions);
+        Assert.Equal(fixture.StateStore.State.Eligibility.LastAttemptAtUtc!.Value.AddHours(5),
+            nextDefinition.SchedulePlan.OneShotTriggerAtUtc);
         Assert.True(fixture.Launcher.ClaimedAtLaunch);
         Assert.Equal(1, fixture.Launcher.CallCount);
         Assert.Single(fixture.LogWriter.Entries);
         Assert.Equal(StructuredLogKind.FORMAL_SLOT, fixture.LogWriter.Entries[0].Kind);
         Assert.DoesNotContain(fixture.ConfigStore.Config.Prompt, System.Text.Json.JsonSerializer.Serialize(fixture.LogWriter.Entries[0]));
+    }
+
+    [Fact]
+    public async Task DelayedOneShotWakeAfterSleep_ReevaluatesOnceWithoutReplayingLegacySlots()
+    {
+        var missedTriggerAtUtc = AtLocal(TestDate, new TimeOnly(7, 0));
+        var resumedAtUtc = AtLocal(TestDate, new TimeOnly(13, 37, 12));
+        var fixture = CreateFixture(resumedAtUtc);
+        fixture.Scheduler.Status = fixture.Scheduler.Status with
+        {
+            Readback = fixture.Scheduler.Status.Readback! with
+            {
+                Triggers =
+                [
+                    new SchedulerTriggerReadback(
+                        1,
+                        IsDaily: false,
+                        Enabled: true,
+                        DaysInterval: 0,
+                        StartBoundary: missedTriggerAtUtc.ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz"),
+                        EndBoundary: missedTriggerAtUtc.AddDays(3650).ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz"))
+                ]
+            }
+        };
+
+        var exitCode = await fixture.CreateRunner().RunFormalSlotAsync(CancellationToken.None);
+
+        Assert.Equal(RunnerExitCode.ConfirmedSuccess, exitCode);
+        Assert.Equal(1, fixture.Launcher.CallCount);
+        var record = Assert.Single(fixture.StateStore.State.FormalSlots);
+        Assert.Equal(0, record.Position);
+        Assert.Equal(resumedAtUtc, record.UpdatedAtUtc);
+        var nextDefinition = Assert.Single(fixture.Scheduler.Definitions);
+        Assert.Equal(resumedAtUtc.AddHours(5), nextDefinition.SchedulePlan.OneShotTriggerAtUtc);
+        Assert.True(nextDefinition.SchedulePlan.OneShotTriggerAtUtc > resumedAtUtc);
     }
 
     [Fact]
@@ -75,9 +114,21 @@ public sealed class RunnerOrchestratorTests
     }
 
     [Fact]
-    public async Task FutureSlot_IsPendingAndDoesNotLaunch()
+    public async Task BeforeCoreEligibilityTime_IsPendingAndDoesNotLaunch()
     {
-        var fixture = CreateFixture(AtLocal(TestDate, new TimeOnly(6, 55)));
+        var now = AtLocal(TestDate, new TimeOnly(13, 0));
+        var highWater = now;
+        var state = StateDocument.Empty() with
+        {
+            HighestObservedUtc = highWater,
+            Eligibility = EligibilityState.Empty() with
+            {
+                ExternalManualUsageUnknown = false,
+                HighestObservedUtc = highWater,
+                LastAttemptAtUtc = now.AddHours(-2)
+            }
+        };
+        var fixture = CreateFixture(now, state: state);
 
         var exitCode = await fixture.CreateRunner().RunFormalSlotAsync(CancellationToken.None);
 
@@ -87,16 +138,17 @@ public sealed class RunnerOrchestratorTests
     }
 
     [Fact]
-    public async Task ExpiredSlot_IsMissedAndNeverLaunched()
+    public async Task PastLegacySlotWindow_DoesNotBlockEligibleAttempt()
     {
         var fixture = CreateFixture(AtLocal(TestDate, new TimeOnly(7, 4)));
 
         var exitCode = await fixture.CreateRunner().RunFormalSlotAsync(CancellationToken.None);
 
-        Assert.Equal(RunnerExitCode.NoDispatch, exitCode);
+        Assert.Equal(RunnerExitCode.ConfirmedSuccess, exitCode);
         var record = Assert.Single(fixture.StateStore.State.FormalSlots);
-        Assert.Equal(FormalSlotStatus.MISSED, record.Status);
-        Assert.Equal(0, fixture.Launcher.CallCount);
+        Assert.Equal(0, record.Position);
+        Assert.Equal(FormalSlotStatus.CONFIRMED_SUCCESS, record.Status);
+        Assert.Equal(1, fixture.Launcher.CallCount);
     }
 
     [Fact]
@@ -157,7 +209,7 @@ public sealed class RunnerOrchestratorTests
     }
 
     [Fact]
-    public async Task SchedulerTriggerTimeMismatch_FailsClosedBeforeClaim()
+    public async Task SchedulerTriggerShapeDoesNotDecideCoreEligibility()
     {
         var fixture = CreateFixture(AtLocal(TestDate, new TimeOnly(7, 1)));
         fixture.Scheduler.Status = fixture.Scheduler.Status with
@@ -172,6 +224,22 @@ public sealed class RunnerOrchestratorTests
                     new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T22:01:00")
                 ]
             }
+        };
+
+        var exitCode = await fixture.CreateRunner().RunFormalSlotAsync(CancellationToken.None);
+
+        Assert.Equal(RunnerExitCode.ConfirmedSuccess, exitCode);
+        Assert.Equal(FormalSlotStatus.CONFIRMED_SUCCESS, Assert.Single(fixture.StateStore.State.FormalSlots).Status);
+        Assert.Equal(1, fixture.Launcher.CallCount);
+    }
+
+    [Fact]
+    public async Task ModifiedSchedulerAction_FailsClosedBeforeClaim()
+    {
+        var fixture = CreateFixture(AtLocal(TestDate, new TimeOnly(13, 37)));
+        fixture.Scheduler.Status = fixture.Scheduler.Status with
+        {
+            Readback = fixture.Scheduler.Status.Readback! with { ActionPath = @"C:\changed\Runner.exe" }
         };
 
         var exitCode = await fixture.CreateRunner().RunFormalSlotAsync(CancellationToken.None);
@@ -605,7 +673,7 @@ public sealed class RunnerOrchestratorTests
     private static SchedulerStatus CreateSchedulerStatus(string taskPath, string runnerPath, bool enabled)
     {
         var readback = new SchedulerTaskReadback(
-            Array.Empty<SchedulerTriggerReadback>(), false, "IgnoreNew", "PT2M", 0, null, false,
+            Array.Empty<SchedulerTriggerReadback>(), true, "IgnoreNew", "PT2M", 0, null, false,
             "S-1-5-21-test", 3, 0, 0, runnerPath, $"--task-path \"{taskPath}\"", Path.GetDirectoryName(runnerPath));
         return new SchedulerStatus(taskPath, enabled ? SchedulerState.OWNED_ENABLED : SchedulerState.OWNED_DISABLED,
             true, true, enabled, SchedulerTaskContract.OwnerMarker, readback, Array.Empty<string>(), null);
@@ -702,14 +770,30 @@ public sealed class RunnerOrchestratorTests
     {
         public SchedulerStatus Status { get; set; } = status;
         public int ReadCount { get; private set; }
+        public List<SchedulerTaskDefinition> Definitions { get; } = [];
         public Task<SchedulerStatus> ReadStatusAsync(string taskPath, string currentRunnerPath, string configuredTimeZoneId,
             CancellationToken cancellationToken)
         {
             ReadCount++;
             return Task.FromResult(Status);
         }
-        public Task<SchedulerOperationResult> InstallOrUpdateAsync(SchedulerTaskDefinition definition, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
+        public Task<SchedulerOperationResult> InstallOrUpdateAsync(SchedulerTaskDefinition definition, CancellationToken cancellationToken)
+        {
+            Definitions.Add(definition);
+            var readback = Status.Readback!;
+            var triggers = definition.SchedulePlan.OneShotTriggerAtUtc is { } at
+                ? new[] { new SchedulerTriggerReadback(1, false, true, 0,
+                    at.ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz"),
+                    at.AddDays(3650).ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz")) }
+                : Array.Empty<SchedulerTriggerReadback>();
+            Status = Status with
+            {
+                State = definition.Enabled ? SchedulerState.OWNED_ENABLED : SchedulerState.OWNED_DISABLED,
+                IsEnabled = definition.Enabled,
+                Readback = readback with { Triggers = triggers, WakeToRun = definition.WakeToRun }
+            };
+            return Task.FromResult(new SchedulerOperationResult(true, null, Status));
+        }
         public Task<SchedulerOperationResult> DisableAsync(string taskPath, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
         public Task<SchedulerOperationResult> RemoveAsync(string taskPath, CancellationToken cancellationToken) =>

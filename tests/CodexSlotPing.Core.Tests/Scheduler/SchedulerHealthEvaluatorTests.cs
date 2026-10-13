@@ -1,4 +1,5 @@
 using CodexSlotPing.Core.Scheduler;
+using System.Globalization;
 
 namespace CodexSlotPing.Core.Tests.Scheduler;
 
@@ -56,21 +57,48 @@ public sealed class SchedulerHealthEvaluatorTests
         Assert.Equal(SchedulerState.ON, systemMode.State);
     }
 
+    [Fact]
+    public void PlannedTriggerReadback_MustMatchTheOneShotPlan()
+    {
+        var runnerPath = Path.Combine(Path.GetTempPath(), "CodexSlotPing.Runner.exe");
+        var plannedAt = new DateTimeOffset(2099, 1, 1, 15, 0, 0, TimeSpan.Zero);
+        var plan = SchedulePlan.At(plannedAt);
+        var status = OwnedStatus(runnerPath) with { Readback = Readback(runnerPath, plannedAt) };
+        var evaluator = new SchedulerHealthEvaluator();
+
+        var matching = evaluator.Evaluate(status, runnerPath, "SYSTEM", TimeZoneInfo.Local.Id, plan);
+        var missing = evaluator.Evaluate(
+            status with { Readback = status.Readback! with { Triggers = Array.Empty<SchedulerTriggerReadback>() } },
+            runnerPath, "SYSTEM", TimeZoneInfo.Local.Id, plan);
+
+        Assert.Equal(SchedulerState.ON, matching.State);
+        Assert.Equal(SchedulerState.NEEDS_REPAIR, missing.State);
+        Assert.Contains("trigger-plan-mismatch", missing.ContractMismatches);
+    }
+
     private static SchedulerStatus OwnedStatus(string actionPath) =>
         new(TaskPath, SchedulerState.OWNED_ENABLED, true, true, true,
             "Codex Slot Ping; Owner=CodexSlotPing; Schema=1", Readback(actionPath),
             Array.Empty<string>(), null);
 
-    private static SchedulerTaskReadback Readback(string actionPath) =>
-        new(
-            [
-                new(2, true, true, 1, "2099-01-01T07:00:00"),
-                new(2, true, true, 1, "2099-01-01T12:01:00"),
-                new(2, true, true, 1, "2099-01-01T17:01:00"),
-                new(2, true, true, 1, "2099-01-01T22:01:00")
-            ],
-            false, "IgnoreNew", "PT2M", 0, null, false, "S-1-test", 3, 0,
+    private static SchedulerTaskReadback Readback(string actionPath) => Readback(actionPath, null);
+
+    private static SchedulerTaskReadback Readback(string actionPath, DateTimeOffset? triggerAtUtc)
+    {
+        var triggers = triggerAtUtc is { } at
+            ? new[] { new SchedulerTriggerReadback(
+                1,
+                false,
+                true,
+                0,
+                at.ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture),
+                at.AddDays(3650).ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture)) }
+            : Array.Empty<SchedulerTriggerReadback>();
+        return new SchedulerTaskReadback(
+            triggers,
+            true, "IgnoreNew", "PT2M", 0, null, false, "S-1-test", 3, 0,
             0, actionPath, $"--task-path \"{TaskPath}\"", Path.GetDirectoryName(actionPath));
+    }
 
     private static bool IsHealthy(SchedulerStatus status) =>
         status.State is SchedulerState.ON or SchedulerState.OFF;

@@ -58,7 +58,7 @@ public sealed class SlotAdmissionEvaluatorTests
     {
         var reordered = AppConfigDefaults.Create() with
         {
-            Slots = ["17:01", "07:00", "22:01", "12:01"],
+            LegacyFixedSlots = ["17:01", "07:00", "22:01", "12:01"],
             TimeZone = EasternTimeZoneId
         };
         var nowUtc = AtLocal(EasternTimeZone, new DateOnly(2026, 1, 15), new TimeOnly(12, 2));
@@ -145,7 +145,7 @@ public sealed class SlotAdmissionEvaluatorTests
 
     private static AppConfig ConfigWithTimes(params string[] slots)
     {
-        return AppConfigDefaults.Create() with { Slots = slots, TimeZone = EasternTimeZoneId };
+        return AppConfigDefaults.Create() with { LegacyFixedSlots = slots, TimeZone = EasternTimeZoneId };
     }
 
     private static DateTimeOffset AtLocal(TimeZoneInfo timeZone, DateOnly date, TimeOnly time)

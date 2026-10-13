@@ -23,10 +23,10 @@ public partial class SettingsWindow : Window
     private void InitializeFields()
     {
         var config = _screenState.Config;
-        Slot1Text.Text = config.Slots.ElementAtOrDefault(0) ?? "07:00";
-        Slot2Text.Text = config.Slots.ElementAtOrDefault(1) ?? "12:01";
-        Slot3Text.Text = config.Slots.ElementAtOrDefault(2) ?? "17:01";
-        Slot4Text.Text = config.Slots.ElementAtOrDefault(3) ?? "22:01";
+        Slot1Text.Text = config.LegacyFixedSlots.ElementAtOrDefault(0) ?? "07:00";
+        Slot2Text.Text = config.LegacyFixedSlots.ElementAtOrDefault(1) ?? "12:01";
+        Slot3Text.Text = config.LegacyFixedSlots.ElementAtOrDefault(2) ?? "17:01";
+        Slot4Text.Text = config.LegacyFixedSlots.ElementAtOrDefault(3) ?? "22:01";
         ModelText.Text = config.Model;
         PromptText.Text = config.Prompt;
         WakeCheck.IsChecked = config.WakeToRun;
@@ -70,7 +70,7 @@ public partial class SettingsWindow : Window
         {
             var candidate = _screenState.Config with
             {
-                Slots = [Slot1Text.Text.Trim(), Slot2Text.Text.Trim(), Slot3Text.Text.Trim(), Slot4Text.Text.Trim()],
+                LegacyFixedSlots = [Slot1Text.Text.Trim(), Slot2Text.Text.Trim(), Slot3Text.Text.Trim(), Slot4Text.Text.Trim()],
                 Model = ModelText.Text.Trim(),
                 ReasoningEffort = ReasoningCombo.SelectedValue?.ToString() ?? string.Empty,
                 Prompt = PromptText.Text,

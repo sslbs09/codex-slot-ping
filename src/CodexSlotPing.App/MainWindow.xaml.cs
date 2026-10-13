@@ -83,25 +83,19 @@ public partial class MainWindow : Window
         };
         VersionText.Text = state.Codex.CliVersion ?? UiText.Get("Main.CliVersionUnavailable");
 
-        if (state.NextSlot is null)
+        if (state.SchedulePlan.OneShotTriggerAtUtc is not { } nextAttemptUtc)
         {
             NextSlotTimeText.Text = "—";
             NextSlotCountdownText.Text = state.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
                 ? UiText.Get("Main.UpdateTimezoneForNext")
-                : UiText.Get("Main.NoEligibleFutureSlot");
+                : UiText.Get("Main.NoPlannedAttempt");
         }
         else
         {
-            var timeZone = TimeZoneInfo.FindSystemTimeZoneById(state.CurrentWindowsTimeZoneId);
-            var localStart = TimeZoneInfo.ConvertTime(state.NextSlot.StartUtc, timeZone);
-            NextSlotTimeText.Text = localStart.ToString("HH:mm");
-            var windowEnd = state.NextSlot.StartUtc.AddMinutes(4);
-            var remaining = state.NowUtc < windowEnd && state.NowUtc >= state.NextSlot.StartUtc
-                ? windowEnd - state.NowUtc
-                : state.NextSlot.StartUtc - state.NowUtc;
-            NextSlotCountdownText.Text = state.NowUtc >= state.NextSlot.StartUtc && state.NowUtc < windowEnd
-                ? UiText.Format("Main.AdmissionWindowClosesIn", FormatDuration(remaining))
-                : UiText.Format("Main.StartsIn", FormatDuration(remaining));
+            NextSlotTimeText.Text = nextAttemptUtc.ToLocalTime().ToString("g");
+            NextSlotCountdownText.Text = nextAttemptUtc <= state.NowUtc
+                ? UiText.Get("Main.AttemptPlannedNow")
+                : UiText.Format("Main.StartsIn", FormatDuration(nextAttemptUtc - state.NowUtc));
         }
 
         TodayRows.ItemsSource = state.TodaySlots.Select(slot => new TodayRow(

@@ -43,6 +43,13 @@ public sealed class FormalSlotClaimService
         return Task.Run(() => TryClaimCurrentSlot(cancellationToken), CancellationToken.None);
     }
 
+    public Task<SlotClaimResult> TryClaimScheduledAttemptAsync(CancellationToken cancellationToken)
+    {
+        // Dynamic scheduler triggers have no fixed-slot admission window. The Core evaluator and
+        // the same mutex still decide and persist the single scheduled claim.
+        return Task.Run(() => TryClaimScheduledAttempt(cancellationToken), CancellationToken.None);
+    }
+
     public Task<EligibilityDecision> GetEligibilityDecisionAsync(
         EligibilityRequest request,
         CancellationToken cancellationToken)
@@ -484,6 +491,128 @@ public sealed class FormalSlotClaimService
                 Eligibility = stateAtNow.Eligibility! with { HasUnresolvedClaim = true }
             };
 
+            if (!TrySaveState(claimedState, cancellationToken))
+            {
+                return Blocked(SlotClaimBlockReason.StatePersistenceFailed);
+            }
+
+            return new SlotClaimResult(SlotClaimKind.Claimed, slotId, FormalSlotStatus.CLAIMED, null)
+            {
+                ConfigSnapshot = config,
+                EligibilityDecision = decision
+            };
+        }
+    }
+
+    private SlotClaimResult TryClaimScheduledAttempt(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        StateMutexLease? lease;
+        try
+        {
+            lease = _stateMutex.TryAcquire(MutexTimeout);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return Blocked(SlotClaimBlockReason.MutexUnavailable);
+        }
+
+        if (lease is null)
+        {
+            return Blocked(SlotClaimBlockReason.MutexUnavailable);
+        }
+
+        using (lease)
+        {
+            AppConfig config;
+            StateDocument loadedState;
+            StateDocument state;
+            try
+            {
+                config = _configStore.LoadOrCreateAsync(cancellationToken).GetAwaiter().GetResult();
+                loadedState = _stateStore.LoadAsync(cancellationToken).GetAwaiter().GetResult();
+                state = StateDocumentMigrator.MigrateV1ToV2(loadedState);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is InvalidDataException or IOException or JsonException or UnauthorizedAccessException)
+            {
+                return Blocked(SlotClaimBlockReason.InvalidConfigOrState);
+            }
+
+            if (!config.Enabled)
+            {
+                return Blocked(SlotClaimBlockReason.ConfigurationDisabled);
+            }
+
+            var nowUtc = _clock.UtcNow.ToUniversalTime();
+            var stateForEvaluation = state.Eligibility! with { HighestObservedUtc = state.HighestObservedUtc };
+            var decision = _eligibilityEvaluator.Evaluate(stateForEvaluation, EligibilityRequest.Scheduled(nowUtc));
+            var highestObservedUtc = Later(state.HighestObservedUtc, nowUtc);
+            var stateAtNow = WithHighWater(state, highestObservedUtc);
+
+            if (decision.Status != EligibilityStatus.Eligible)
+            {
+                var blockedByRollback = decision.Reason == EligibilityReason.ClockRollback;
+                var kind = decision.Status == EligibilityStatus.NotYetEligible
+                    ? SlotClaimKind.NotEligible
+                    : SlotClaimKind.Blocked;
+                return SaveResultOrBlock(
+                    loadedState,
+                    stateAtNow,
+                    kind,
+                    blockedByRollback ? SlotClaimBlockReason.ClockRollback :
+                        kind == SlotClaimKind.Blocked ? SlotClaimBlockReason.EligibilityNotSatisfied : null,
+                    null,
+                    null,
+                    decision,
+                    cancellationToken);
+            }
+
+            string timeZoneId;
+            TimeZoneInfo timeZone;
+            try
+            {
+                timeZoneId = _timeZoneProvider.CurrentWindowsTimeZoneId;
+                timeZone = _timeZoneProvider.Resolve(timeZoneId);
+            }
+            catch (Exception exception) when (exception is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
+            {
+                return SaveHighWaterOrBlock(
+                    loadedState, stateAtNow, SlotClaimBlockReason.TimeZoneUnavailable, cancellationToken, decision: decision);
+            }
+
+            if (!string.Equals(config.TimeZone, "SYSTEM", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(config.TimeZone, timeZoneId, StringComparison.OrdinalIgnoreCase))
+            {
+                return SaveHighWaterOrBlock(
+                    loadedState, stateAtNow, SlotClaimBlockReason.TimeZoneMismatch, cancellationToken, decision: decision);
+            }
+
+            var localNow = TimeZoneInfo.ConvertTime(nowUtc, timeZone).DateTime;
+            var slotId = new SlotId(timeZoneId, DateOnly.FromDateTime(localNow), TimeOnly.FromDateTime(localNow));
+            var existing = stateAtNow.FormalSlots.FirstOrDefault(record => record.SlotId == slotId);
+            if (existing is not null)
+            {
+                return SaveHighWaterOrBlock(
+                    loadedState,
+                    stateAtNow,
+                    SlotClaimBlockReason.InvalidConfigOrState,
+                    cancellationToken,
+                    SlotClaimKind.AlreadyConsumed,
+                    slotId,
+                    existing.Status,
+                    decision);
+            }
+
+            var claimedRecord = new FormalSlotRecord(slotId, 0, FormalSlotStatus.CLAIMED, nowUtc, null);
+            var claimedState = stateAtNow with
+            {
+                FormalSlots = stateAtNow.FormalSlots.Append(claimedRecord).ToArray(),
+                Eligibility = stateAtNow.Eligibility! with { HasUnresolvedClaim = true }
+            };
             if (!TrySaveState(claimedState, cancellationToken))
             {
                 return Blocked(SlotClaimBlockReason.StatePersistenceFailed);

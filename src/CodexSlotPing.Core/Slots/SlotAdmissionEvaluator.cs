@@ -49,7 +49,7 @@ public sealed class SlotAdmissionEvaluator
             return Blocked(AdmissionBlockReason.TimeZoneUnavailable);
         }
 
-        if (!TryGetDefinitions(config.Slots, out var definitions))
+        if (!TryGetDefinitions(config.LegacyFixedSlots, out var definitions))
         {
             return Blocked(AdmissionBlockReason.InvalidConfiguration);
         }

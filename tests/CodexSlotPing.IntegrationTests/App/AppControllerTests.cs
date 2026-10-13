@@ -66,24 +66,63 @@ public sealed class AppControllerTests
     }
 
     [Fact]
-    public async Task RefreshAsync_ReportsOwnedTaskTriggerTimeDrift()
+    public async Task RefreshAsync_ReplacesLegacyDailyTriggersWithCurrentOneShotPlan()
     {
         var config = AppConfigDefaults.Create();
         var initial = Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath);
-        var changedTimes = new[]
-        {
-            new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T07:00:00"),
-            new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T12:02:00"),
-            new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T17:01:00"),
-            new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T22:01:00")
-        };
+        var changedTimes = new[] { new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T07:00:00") };
         var status = initial with { Readback = initial.Readback! with { Triggers = changedTimes } };
         var fixture = new Fixture(config, status);
 
         var state = await fixture.Controller.RefreshAsync(CancellationToken.None);
 
-        Assert.Equal(SchedulerState.NEEDS_REPAIR, state.Scheduler.State);
-        Assert.Contains("trigger-times-mismatch", state.Scheduler.ContractMismatches);
+        Assert.Equal(SchedulerState.ON, state.Scheduler.State);
+        var definition = Assert.Single(fixture.Scheduler.Definitions);
+        Assert.NotNull(definition.SchedulePlan.OneShotTriggerAtUtc);
+        Assert.Single(state.Scheduler.Readback!.Triggers);
+        Assert.True(state.Scheduler.Readback.Triggers[0].IsOneShot);
+    }
+
+    [Fact]
+    public async Task ExternalUsageUnknown_StillProducesLocalOneShotPlan()
+    {
+        var fixture = new Fixture(AppConfigDefaults.Create(),
+            Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath));
+
+        var state = await fixture.Controller.RefreshAsync(CancellationToken.None);
+
+        Assert.Equal(EligibilityStatus.Eligible, state.EligibilityDecision.Status);
+        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, state.EligibilityDecision.ExplanationReason);
+        Assert.NotNull(state.SchedulePlan.OneShotTriggerAtUtc);
+        Assert.True(Assert.Single(fixture.Scheduler.Definitions).SchedulePlan.OneShotTriggerAtUtc.HasValue);
+    }
+
+    [Fact]
+    public async Task UsageLimitWithoutTrustedReset_ProducesNoTrigger()
+    {
+        var fixture = new Fixture(AppConfigDefaults.Create(),
+            Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath));
+        var observedAt = Now.AddMinutes(-5);
+        var usageLimit = new EligibilityObservation(
+            EligibilityObservationKind.UsageLimitReached,
+            observedAt,
+            ObservationSource.AppScheduled,
+            Confidence.High);
+        fixture.StateStore.SetState(StateDocument.Empty() with
+        {
+            HighestObservedUtc = Now,
+            Eligibility = EligibilityState.Empty() with
+            {
+                HighestObservedUtc = Now,
+                Observations = [usageLimit]
+            }
+        });
+
+        var state = await fixture.Controller.RefreshAsync(CancellationToken.None);
+
+        Assert.Equal(EligibilityStatus.Blocked, state.EligibilityDecision.Status);
+        Assert.Null(state.SchedulePlan.OneShotTriggerAtUtc);
+        Assert.Empty(fixture.Scheduler.Definitions);
     }
 
     [Fact]
@@ -150,7 +189,7 @@ public sealed class AppControllerTests
     {
         var fixture = new Fixture(AppConfigDefaults.Create(),
             Status(SchedulerState.OFF, exists: false, owned: false, enabled: false, RunnerPath));
-        var invalid = fixture.ConfigStore.Config with { Slots = ["bad", "12:01", "17:01", "22:01"] };
+        var invalid = fixture.ConfigStore.Config with { LegacyFixedSlots = ["bad", "12:01", "17:01", "22:01"] };
 
         var result = await fixture.Controller.SaveSettingsAsync(invalid, CancellationToken.None);
 
@@ -339,8 +378,19 @@ public sealed class AppControllerTests
             CancellationToken cancellationToken)
         {
             Definitions.Add(definition);
+            var readback = Status(definition.Enabled ? SchedulerState.ON : SchedulerState.OFF,
+                exists: true, owned: true, definition.Enabled, expectedRunner).Readback!;
+            var triggerAtUtc = definition.SchedulePlan.OneShotTriggerAtUtc;
+            var triggers = triggerAtUtc is { } at
+                ? new[] { new SchedulerTriggerReadback(1, false, true, 0,
+                    at.ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz"),
+                    at.AddDays(3650).ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz")) }
+                : Array.Empty<SchedulerTriggerReadback>();
             Current = Status(definition.Enabled ? SchedulerState.ON : SchedulerState.OFF,
-                exists: true, owned: true, definition.Enabled, expectedRunner);
+                exists: true, owned: true, definition.Enabled, expectedRunner) with
+            {
+                Readback = readback with { Triggers = triggers }
+            };
             return Task.FromResult(new SchedulerOperationResult(true, null, Current));
         }
 

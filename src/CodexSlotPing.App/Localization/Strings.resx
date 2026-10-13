@@ -12,13 +12,13 @@
   <data name="Main.LoginNotConfirmed" xml:space="preserve"><value>ChatGPT login not confirmed</value></data>
   <data name="Main.LoginUnknown" xml:space="preserve"><value>Login status could not be confirmed</value></data>
   <data name="Main.CliVersionUnavailable" xml:space="preserve"><value>Codex CLI version unavailable</value></data>
-  <data name="Main.NextSlot" xml:space="preserve"><value>NEXT SLOT</value></data>
+  <data name="Main.NextSlot" xml:space="preserve"><value>NEXT PLANNED ATTEMPT</value></data>
   <data name="Main.WaitingForSchedule" xml:space="preserve"><value>Waiting for schedule</value></data>
-  <data name="Main.UpdateTimezoneForNext" xml:space="preserve"><value>Update the timezone lock to calculate the next slot.</value></data>
-  <data name="Main.NoEligibleFutureSlot" xml:space="preserve"><value>No eligible future slot is available.</value></data>
-  <data name="Main.AdmissionWindowClosesIn" xml:space="preserve"><value>Admission window closes in {0}</value></data>
+  <data name="Main.UpdateTimezoneForNext" xml:space="preserve"><value>Update the timezone lock before calculating the next planned attempt.</value></data>
+  <data name="Main.NoPlannedAttempt" xml:space="preserve"><value>No attempt is currently planned.</value></data>
+  <data name="Main.AttemptPlannedNow" xml:space="preserve"><value>Based on the local scheduling policy.</value></data>
   <data name="Main.StartsIn" xml:space="preserve"><value>Starts in {0}</value></data>
-  <data name="Main.Today" xml:space="preserve"><value>TODAY</value></data>
+  <data name="Main.Today" xml:space="preserve"><value>LEGACY FIXED SLOTS</value></data>
   <data name="Main.Model" xml:space="preserve"><value>Model</value></data>
   <data name="Main.Reasoning" xml:space="preserve"><value>Reasoning</value></data>
   <data name="Main.Scheduler" xml:space="preserve"><value>Scheduler</value></data>
@@ -28,7 +28,7 @@
   <data name="Main.TestNow" xml:space="preserve"><value>Test now</value></data>
   <data name="Main.Settings" xml:space="preserve"><value>Settings</value></data>
   <data name="Main.OpenLogs" xml:space="preserve"><value>Open logs</value></data>
-  <data name="Main.StrictSlot" xml:space="preserve"><value>Strict slot · missed slots are not replayed.</value></data>
+  <data name="Main.StrictSlot" xml:space="preserve"><value>The scheduler only wakes Runner; Core checks eligibility again.</value></data>
   <data name="Main.OpenSettingHint" xml:space="preserve"><value>Open the related setting</value></data>
   <data name="Main.OfficialCliInstructions" xml:space="preserve"><value>Install the official Codex CLI: npm install -g @openai/codex&#xD;&#xA;Then sign in with your ChatGPT account: codex login</value></data>
   <data name="Main.StatusRefreshFailed" xml:space="preserve"><value>Status could not be refreshed: {0}</value></data>
@@ -126,15 +126,15 @@
   <data name="Settings.WindowTitle" xml:space="preserve"><value>Codex Slot Ping settings</value></data>
   <data name="Settings.Header" xml:space="preserve"><value>SETTINGS</value></data>
   <data name="Settings.SectionTitle" xml:space="preserve"><value>Schedule and request</value></data>
-  <data name="Settings.FourLocalTimes" xml:space="preserve"><value>Four local times (24-hour HH:mm)</value></data>
+  <data name="Settings.FourLocalTimes" xml:space="preserve"><value>Legacy fixed slots for diagnostics (24-hour HH:mm; not used for scheduling)</value></data>
   <data name="Settings.ModelRequest" xml:space="preserve"><value>Model selection request</value></data>
   <data name="Settings.ReasoningSupport" xml:space="preserve"><value>Reasoning effort supported by the detected CLI</value></data>
-  <data name="Settings.PromptLabel" xml:space="preserve"><value>Prompt sent at each formal slot and by Test Now</value></data>
+  <data name="Settings.PromptLabel" xml:space="preserve"><value>Prompt sent by scheduled attempts and Test Now</value></data>
   <data name="Settings.TimezoneBehavior" xml:space="preserve"><value>Timezone behavior</value></data>
   <data name="Settings.SystemTimezoneDescription" xml:space="preserve"><value>SYSTEM follows Windows. A timezone lock must match the current Windows timezone.</value></data>
   <data name="Settings.TimezoneSystem" xml:space="preserve"><value>SYSTEM</value></data>
   <data name="Settings.ConfirmTimezone" xml:space="preserve"><value>Confirm current timezone and update scheduler</value></data>
-  <data name="Settings.WakeComputer" xml:space="preserve"><value>Wake the computer for scheduled slots</value></data>
+  <data name="Settings.WakeComputer" xml:space="preserve"><value>Wake the computer for a planned attempt</value></data>
   <data name="Settings.RawLogs" xml:space="preserve"><value>Capture raw Codex output locally (14-day retention)</value></data>
   <data name="Settings.RawLogsExplanation" xml:space="preserve"><value>Raw output can contain Codex responses. It stays in your local logs folder and is removed after 14 days.</value></data>
   <data name="Settings.Save" xml:space="preserve"><value>Save settings</value></data>
@@ -142,10 +142,10 @@
   <data name="Settings.DisableScheduler" xml:space="preserve"><value>Disable scheduler</value></data>
   <data name="Settings.RemoveScheduler" xml:space="preserve"><value>Remove scheduler</value></data>
   <data name="Settings.Close" xml:space="preserve"><value>Close</value></data>
-  <data name="Settings.SchedulerWarning" xml:space="preserve"><value>Installing enables four local-time triggers. Each eligible trigger can send the configured prompt to Codex and may count toward usage.</value></data>
+  <data name="Settings.SchedulerWarning" xml:space="preserve"><value>Windows Scheduler only wakes Runner at one planned time. Runner rechecks Core eligibility before any Codex request.</value></data>
   <data name="Settings.Saved" xml:space="preserve"><value>Settings saved.</value></data>
   <data name="Settings.InstallConfirmTitle" xml:space="preserve"><value>Confirm scheduler installation</value></data>
-  <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>This creates or updates the owned Windows scheduled task. At each eligible slot it sends your configured prompt to Codex and may count toward usage limits. Continue?</value></data>
+  <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>This creates or updates the owned Windows task. When local policy allows an attempt, it wakes Runner, which rechecks eligibility before sending your configured prompt to Codex. Continue?</value></data>
   <data name="Settings.InstallSuccess" xml:space="preserve"><value>Scheduler installed and read back as ON.</value></data>
   <data name="Settings.DisableConfirmTitle" xml:space="preserve"><value>Disable scheduler</value></data>
   <data name="Settings.DisableConfirmBody" xml:space="preserve"><value>Disable the owned Codex Slot Ping scheduled task?</value></data>
@@ -165,7 +165,7 @@
   <data name="Exit.PreferenceSaveFailed" xml:space="preserve"><value>Exit will continue, but the preference could not be saved: {0}</value></data>
   <data name="Exit.WarningTitle" xml:space="preserve"><value>Codex Slot Ping is scheduled</value></data>
   <data name="Exit.SuppressWarning" xml:space="preserve"><value>Don't show this warning again</value></data>
-  <data name="Exit.Warning" xml:space="preserve"><value>Closing Codex Slot Ping does not disable scheduled slots.</value></data>
+  <data name="Exit.Warning" xml:space="preserve"><value>Closing Codex Slot Ping does not disable planned attempts.</value></data>
   <data name="Exit.Explanation" xml:space="preserve"><value>The scheduled task runs independently of this window. Exit only closes the app.</value></data>
   <data name="Exit.ExitApp" xml:space="preserve"><value>Exit app</value></data>
   <data name="Exit.Cancel" xml:space="preserve"><value>Cancel</value></data>
