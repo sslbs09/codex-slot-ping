@@ -7,7 +7,8 @@ public sealed record EligibilityDecisionDisplay(
     string Status,
     string Reason,
     string Confidence,
-    string? NextEligibleAt);
+    string? NextEligibleAt,
+    string? Explanation);
 
 public static class EligibilityDecisionProjection
 {
@@ -21,7 +22,10 @@ public static class EligibilityDecisionProjection
             UiText.Get($"Eligibility.Status.{decision.Status}", selectedCulture),
             UiText.Get($"Eligibility.Reason.{decision.Reason}", selectedCulture),
             UiText.Get($"Eligibility.Confidence.{decision.Confidence}", selectedCulture),
-            decision.NextEligibleAtUtc?.ToLocalTime().ToString("g", selectedCulture));
+            decision.NextEligibleAtUtc?.ToLocalTime().ToString("g", selectedCulture),
+            decision.ExplanationReason is { } explanationReason
+                ? UiText.Get($"Eligibility.Reason.{explanationReason}", selectedCulture)
+                : null);
     }
 
     public static string FormatTestNowConfirmation(
@@ -38,7 +42,8 @@ public static class EligibilityDecisionProjection
             display.Status,
             display.Reason,
             display.Confidence,
-            display.NextEligibleAt ?? UiText.Get("Eligibility.None", selectedCulture));
+            display.NextEligibleAt ?? UiText.Get("Eligibility.None", selectedCulture),
+            FormatExplanation(display.Explanation, selectedCulture));
     }
 
     public static string FormatDetails(
@@ -54,6 +59,15 @@ public static class EligibilityDecisionProjection
             Environment.NewLine,
             display.Reason,
             display.Confidence,
-            display.NextEligibleAt ?? UiText.Get("Eligibility.None", selectedCulture));
+            display.NextEligibleAt ?? UiText.Get("Eligibility.None", selectedCulture),
+            FormatExplanation(display.Explanation, selectedCulture));
     }
+
+    private static string FormatExplanation(string? explanation, CultureInfo culture) =>
+        explanation is null
+            ? string.Empty
+            : Environment.NewLine + string.Format(
+                culture,
+                UiText.Get("Main.EligibilityExplanation", culture),
+                explanation);
 }

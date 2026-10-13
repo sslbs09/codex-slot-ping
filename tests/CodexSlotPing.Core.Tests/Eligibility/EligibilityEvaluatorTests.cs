@@ -9,18 +9,68 @@ public sealed class EligibilityEvaluatorTests
     private readonly EligibilityEvaluator _evaluator = new();
 
     [Fact]
-    public void UnknownExternalUsage_FailsClosedForScheduledRequest()
+    public void UnknownExternalUsage_DoesNotPermanentlyBlockScheduledRequest()
     {
         var decision = _evaluator.Evaluate(
             EligibilityState.Empty(),
             EligibilityRequest.Scheduled(Now));
 
         Assert.Equal(EligibilityDecision.CurrentSchemaVersion, decision.SchemaVersion);
-        Assert.Equal(EligibilityStatus.Unknown, decision.Status);
-        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, decision.Reason);
+        Assert.Equal(EligibilityStatus.Eligible, decision.Status);
+        Assert.Equal(EligibilityReason.Ready, decision.Reason);
         Assert.Null(decision.NextEligibleAtUtc);
-        Assert.Equal(Confidence.Unknown, decision.Confidence);
+        Assert.Equal(Confidence.Medium, decision.Confidence);
         Assert.Equal(ObservationSource.Unknown, decision.ObservationSource);
+        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, decision.ExplanationReason);
+    }
+
+    [Fact]
+    public void ExternalUsageUnknown_UsesLastSuccessAndLocalSpacingForNextAttempt()
+    {
+        var lastSuccessAt = Now.AddHours(-2);
+        var state = EligibilityState.Empty() with { LastConfirmedSuccessAtUtc = lastSuccessAt };
+
+        var decision = _evaluator.Evaluate(state, EligibilityRequest.Scheduled(Now));
+
+        Assert.Equal(EligibilityStatus.NotYetEligible, decision.Status);
+        Assert.Equal(EligibilityReason.LocalAttemptSpacing, decision.Reason);
+        Assert.Equal(Now.AddHours(3), decision.NextEligibleAtUtc);
+        Assert.Equal(Confidence.Medium, decision.Confidence);
+        Assert.Equal(ObservationSource.Unknown, decision.ObservationSource);
+        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, decision.ExplanationReason);
+    }
+
+    [Fact]
+    public void ExternalUsageUnknown_UsesMostRecentLocalAttemptOrSuccessForSpacing()
+    {
+        var state = EligibilityState.Empty() with
+        {
+            LastAttemptAtUtc = Now.AddHours(-2),
+            LastConfirmedSuccessAtUtc = Now.AddHours(-8)
+        };
+
+        var decision = _evaluator.Evaluate(state, EligibilityRequest.Scheduled(Now));
+
+        Assert.Equal(EligibilityStatus.NotYetEligible, decision.Status);
+        Assert.Equal(EligibilityReason.LocalAttemptSpacing, decision.Reason);
+        Assert.Equal(Now.AddHours(3), decision.NextEligibleAtUtc);
+    }
+
+    [Fact]
+    public void LocalAttemptSpacingBoundary_AllowsAttemptAtExactlyFiveHours()
+    {
+        var state = EligibilityState.Empty() with
+        {
+            LastConfirmedSuccessAtUtc = Now.AddHours(-5)
+        };
+
+        var decision = _evaluator.Evaluate(state, EligibilityRequest.Scheduled(Now));
+
+        Assert.Equal(EligibilityStatus.Eligible, decision.Status);
+        Assert.Equal(EligibilityReason.Ready, decision.Reason);
+        Assert.Null(decision.NextEligibleAtUtc);
+        Assert.Equal(Confidence.Medium, decision.Confidence);
+        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, decision.ExplanationReason);
     }
 
     [Fact]
@@ -36,6 +86,21 @@ public sealed class EligibilityEvaluatorTests
         Assert.Null(decision.NextEligibleAtUtc);
         Assert.Equal(ObservationSource.AppScheduled, decision.ObservationSource);
         Assert.Equal(Confidence.High, decision.Confidence);
+    }
+
+    [Fact]
+    public void UsageLimitWithoutTrustedReset_BlocksWhenExternalUsageIsAlsoUnknown()
+    {
+        var state = EligibilityState.Empty() with
+        {
+            Observations = [Observation(EligibilityObservationKind.UsageLimitReached, Now.AddMinutes(-1))]
+        };
+
+        var decision = _evaluator.Evaluate(state, EligibilityRequest.Scheduled(Now));
+
+        Assert.Equal(EligibilityStatus.Blocked, decision.Status);
+        Assert.Equal(EligibilityReason.UsageLimitWithoutTrustedReset, decision.Reason);
+        Assert.Null(decision.NextEligibleAtUtc);
     }
 
     [Fact]
@@ -162,7 +227,7 @@ public sealed class EligibilityEvaluatorTests
     public void ClockRollback_BlocksUntilThePersistedHighWaterMark()
     {
         var highWater = Now.AddMinutes(5);
-        var state = KnownExternalUsageState() with { HighestObservedUtc = highWater };
+        var state = EligibilityState.Empty() with { HighestObservedUtc = highWater };
 
         var decision = _evaluator.Evaluate(
             state,
@@ -176,7 +241,7 @@ public sealed class EligibilityEvaluatorTests
     [Fact]
     public void UnsupportedStateSchema_FailsClosed()
     {
-        var state = KnownExternalUsageState() with { SchemaVersion = EligibilityState.CurrentSchemaVersion + 1 };
+        var state = EligibilityState.Empty() with { SchemaVersion = EligibilityState.CurrentSchemaVersion + 1 };
 
         var decision = _evaluator.Evaluate(state, EligibilityRequest.Scheduled(Now));
 
@@ -187,7 +252,7 @@ public sealed class EligibilityEvaluatorTests
     [Fact]
     public void UnresolvedClaim_FailsClosedForScheduledRequest()
     {
-        var state = KnownExternalUsageState() with { HasUnresolvedClaim = true };
+        var state = EligibilityState.Empty() with { HasUnresolvedClaim = true };
 
         var decision = _evaluator.Evaluate(state, EligibilityRequest.Scheduled(Now));
 
@@ -196,7 +261,25 @@ public sealed class EligibilityEvaluatorTests
     }
 
     [Fact]
-    public void AttemptAndSuccessTimestamps_DoNotCreateQuotaOrResetPredictions()
+    public void InvalidObservation_FailsClosedWhenExternalUsageIsUnknown()
+    {
+        var state = EligibilityState.Empty() with
+        {
+            Observations = [new EligibilityObservation(
+                (EligibilityObservationKind)int.MaxValue,
+                Now,
+                ObservationSource.Unknown,
+                Confidence.Unknown)]
+        };
+
+        var decision = _evaluator.Evaluate(state, EligibilityRequest.Scheduled(Now));
+
+        Assert.Equal(EligibilityStatus.Blocked, decision.Status);
+        Assert.Equal(EligibilityReason.InvalidState, decision.Reason);
+    }
+
+    [Fact]
+    public void AttemptAndSuccessTimestamps_UseLocalSpacingWithoutQuotaOrResetPredictions()
     {
         var state = KnownExternalUsageState() with
         {
@@ -206,9 +289,9 @@ public sealed class EligibilityEvaluatorTests
 
         var decision = _evaluator.Evaluate(state, EligibilityRequest.Scheduled(Now));
 
-        Assert.Equal(EligibilityStatus.Eligible, decision.Status);
-        Assert.Equal(EligibilityReason.Ready, decision.Reason);
-        Assert.Null(decision.NextEligibleAtUtc);
+        Assert.Equal(EligibilityStatus.NotYetEligible, decision.Status);
+        Assert.Equal(EligibilityReason.LocalAttemptSpacing, decision.Reason);
+        Assert.Equal(Now.AddHours(5).AddSeconds(-10), decision.NextEligibleAtUtc);
     }
 
     [Fact]

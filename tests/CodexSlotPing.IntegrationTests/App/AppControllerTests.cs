@@ -110,7 +110,9 @@ public sealed class AppControllerTests
         var screen = await fixture.Controller.RefreshAsync(CancellationToken.None);
         var runnerClaim = await fixture.ClaimService.TryClaimCurrentSlotAsync(CancellationToken.None);
 
-        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, screen.EligibilityDecision.Reason);
+        Assert.Equal(EligibilityStatus.Eligible, screen.EligibilityDecision.Status);
+        Assert.Equal(EligibilityReason.Ready, screen.EligibilityDecision.Reason);
+        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, screen.EligibilityDecision.ExplanationReason);
         Assert.Equal(screen.EligibilityDecision.Reason, runnerClaim.EligibilityDecision!.Reason);
     }
 

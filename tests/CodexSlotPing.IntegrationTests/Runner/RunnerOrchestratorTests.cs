@@ -270,7 +270,7 @@ public sealed class RunnerOrchestratorTests
     }
 
     [Fact]
-    public async Task UnknownExternalUsage_BlocksRunnerWithoutDispatch()
+    public async Task UnknownExternalUsage_AllowsLocalScheduledAttemptWithoutClearingUncertainty()
     {
         var fixture = CreateFixture(
             AtLocal(TestDate, new TimeOnly(7, 1)),
@@ -278,9 +278,12 @@ public sealed class RunnerOrchestratorTests
 
         var exitCode = await fixture.CreateRunner().RunFormalSlotAsync(CancellationToken.None);
 
-        Assert.Equal(RunnerExitCode.NoDispatch, exitCode);
-        Assert.Empty(fixture.StateStore.State.FormalSlots);
-        Assert.Equal(0, fixture.Launcher.CallCount);
+        Assert.Equal(RunnerExitCode.ConfirmedSuccess, exitCode);
+        Assert.Equal(FormalSlotStatus.CONFIRMED_SUCCESS, Assert.Single(fixture.StateStore.State.FormalSlots).Status);
+        Assert.Equal(1, fixture.Launcher.CallCount);
+        Assert.True(fixture.StateStore.State.Eligibility!.ExternalManualUsageUnknown);
+        Assert.Contains(fixture.StateStore.State.Eligibility.Observations,
+            observation => observation.Kind == EligibilityObservationKind.ConfirmedSuccess);
     }
 
     [Fact]

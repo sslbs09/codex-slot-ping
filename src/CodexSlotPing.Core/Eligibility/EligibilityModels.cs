@@ -35,7 +35,8 @@ public enum EligibilityReason
     UnresolvedClaim,
     UnsupportedStateSchema,
     InvalidRequest,
-    InvalidState
+    InvalidState,
+    LocalAttemptSpacing
 }
 
 public enum ObservationSource
@@ -117,7 +118,8 @@ public sealed record EligibilityDecision(
     DateTimeOffset? NextEligibleAtUtc,
     [property: JsonRequired] Confidence Confidence,
     [property: JsonRequired] ObservationSource ObservationSource,
-    [property: JsonRequired] bool RequiresConfirmation)
+    [property: JsonRequired] bool RequiresConfirmation,
+    EligibilityReason? ExplanationReason = null)
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 }

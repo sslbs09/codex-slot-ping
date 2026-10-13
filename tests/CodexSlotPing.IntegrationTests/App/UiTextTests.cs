@@ -73,12 +73,13 @@ public sealed class UiTextTests
         var decision = new EligibilityDecision(
             EligibilityDecision.CurrentSchemaVersion,
             EligibilityIntent.Scheduled,
-            EligibilityStatus.Unknown,
-            EligibilityReason.ExternalManualUsageUnknown,
-            null,
-            Confidence.Unknown,
+            EligibilityStatus.Eligible,
+            EligibilityReason.Ready,
+            new DateTimeOffset(2026, 10, 13, 9, 0, 0, TimeSpan.Zero),
+            Confidence.Medium,
             ObservationSource.Unknown,
-            false);
+            false,
+            EligibilityReason.ExternalManualUsageUnknown);
 
         var display = EligibilityDecisionProjection.Create(decision, Chinese);
         var details = EligibilityDecisionProjection.FormatDetails(decision, Chinese);
@@ -90,18 +91,31 @@ public sealed class UiTextTests
             null,
             Confidence.Unknown,
             ObservationSource.Unknown,
-            true);
+            true,
+            EligibilityReason.ExternalManualUsageUnknown);
         var confirmation = EligibilityDecisionProjection.FormatTestNowConfirmation(confirmationDecision, Chinese);
 
-        Assert.Equal("未知", display.Status);
-        Assert.Equal("外部 Codex 使用情况未知", display.Reason);
-        Assert.Equal("未知", display.Confidence);
-        Assert.Null(display.NextEligibleAt);
-        Assert.Contains("外部 Codex 使用情况未知", details);
+        Assert.Equal("本地策略允许尝试", display.Status);
+        Assert.Equal("本地策略允许进行尝试", display.Reason);
+        Assert.Equal("中", display.Confidence);
+        Assert.NotNull(display.NextEligibleAt);
+        Assert.Contains("下次计划尝试", details);
+        Assert.Contains("依据本地调度策略计算", details);
+        Assert.Contains("无法观察此应用之外的 Codex 使用情况", details);
+        Assert.DoesNotContain("重置", details);
         Assert.DoesNotContain(nameof(EligibilityReason.ExternalManualUsageUnknown), details);
+        Assert.Equal("本地尝试计划", UiText.Get("Main.EligibilityTitle", Chinese));
+        var englishDetails = EligibilityDecisionProjection.FormatDetails(
+            decision,
+            CultureInfo.GetCultureInfo("en-US"));
+        Assert.Contains("Next planned attempt:", englishDetails);
+        Assert.Contains("Based on local scheduling policy", englishDetails);
+        Assert.DoesNotContain("quota reset", englishDetails, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("状态：需要确认", confirmation);
         Assert.Contains("原因：需要确认一次真实的立即测试请求", confirmation);
         Assert.Contains("可信度：未知", confirmation);
+        Assert.Contains("下次计划尝试：—", confirmation);
+        Assert.Contains("说明：依据本地调度策略计算", confirmation);
     }
 
     [Fact]

@@ -36,9 +36,10 @@
   <data name="Main.TestNowAlreadyRunning" xml:space="preserve"><value>A Test Now request is already running.</value></data>
   <data name="Main.TestNowConfirmTitle" xml:space="preserve"><value>Confirm Test Now</value></data>
   <data name="Main.TestNowConfirmBody" xml:space="preserve"><value>This sends your configured prompt to Codex as a real request and may count toward usage limits. Continue?</value></data>
-  <data name="Main.TestNowConfirmWithDecision" xml:space="preserve"><value>{0}{1}Eligibility: {2}{1}Reason: {3}{1}Confidence: {4}{1}Next eligible: {5}{1}{1}Confirm one Test Now attempt?</value></data>
-  <data name="Main.EligibilityTitle" xml:space="preserve"><value>Eligibility</value></data>
-  <data name="Main.EligibilityDetails" xml:space="preserve"><value>Status: {0}{1}Reason: {2}{1}Confidence: {3}{1}Next eligible: {4}</value></data>
+  <data name="Main.TestNowConfirmWithDecision" xml:space="preserve"><value>{0}{1}Local attempt status: {2}{1}Reason: {3}{1}Confidence: {4}{1}Next planned attempt: {5}{6}{1}{1}Confirm one Test Now attempt?</value></data>
+  <data name="Main.EligibilityTitle" xml:space="preserve"><value>Local attempt plan</value></data>
+  <data name="Main.EligibilityDetails" xml:space="preserve"><value>Status: {0}{1}Reason: {2}{1}Confidence: {3}{1}Next planned attempt: {4}{5}</value></data>
+  <data name="Main.EligibilityExplanation" xml:space="preserve"><value>Note: {0}</value></data>
   <data name="Main.TestNowResultTitle" xml:space="preserve"><value>Test Now result</value></data>
   <data name="Main.TestNowFailedTitle" xml:space="preserve"><value>Test Now failed</value></data>
   <data name="Main.LogsOpenFailed" xml:space="preserve"><value>Logs could not be opened: {0}</value></data>
@@ -169,8 +170,8 @@
   <data name="Exit.ExitApp" xml:space="preserve"><value>Exit app</value></data>
   <data name="Exit.Cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="Eligibility.None" xml:space="preserve"><value>—</value></data>
-  <data name="Eligibility.Status.Eligible" xml:space="preserve"><value>Eligible</value></data>
-  <data name="Eligibility.Status.NotYetEligible" xml:space="preserve"><value>Not yet eligible</value></data>
+  <data name="Eligibility.Status.Eligible" xml:space="preserve"><value>Local policy allows an attempt</value></data>
+  <data name="Eligibility.Status.NotYetEligible" xml:space="preserve"><value>Waiting for planned attempt time</value></data>
   <data name="Eligibility.Status.Blocked" xml:space="preserve"><value>Blocked</value></data>
   <data name="Eligibility.Status.Unknown" xml:space="preserve"><value>Unknown</value></data>
   <data name="Eligibility.Status.ConfirmationRequired" xml:space="preserve"><value>Confirmation required</value></data>
@@ -178,8 +179,8 @@
   <data name="Eligibility.Confidence.Low" xml:space="preserve"><value>Low</value></data>
   <data name="Eligibility.Confidence.Medium" xml:space="preserve"><value>Medium</value></data>
   <data name="Eligibility.Confidence.High" xml:space="preserve"><value>High</value></data>
-  <data name="Eligibility.Reason.Ready" xml:space="preserve"><value>Ready</value></data>
-  <data name="Eligibility.Reason.ExternalManualUsageUnknown" xml:space="preserve"><value>External Codex usage is unknown</value></data>
+  <data name="Eligibility.Reason.Ready" xml:space="preserve"><value>Ready for a local attempt</value></data>
+  <data name="Eligibility.Reason.ExternalManualUsageUnknown" xml:space="preserve"><value>Based on local scheduling policy. Codex usage outside this app cannot currently be observed.</value></data>
   <data name="Eligibility.Reason.UsageLimitWithoutTrustedReset" xml:space="preserve"><value>Usage limit observed without a trusted reset time</value></data>
   <data name="Eligibility.Reason.WaitingForTrustedReset" xml:space="preserve"><value>Waiting for the trusted reset time</value></data>
   <data name="Eligibility.Reason.TestNowConfirmationRequired" xml:space="preserve"><value>Confirm one real Test Now attempt</value></data>
@@ -189,4 +190,5 @@
   <data name="Eligibility.Reason.UnsupportedStateSchema" xml:space="preserve"><value>State schema is not supported</value></data>
   <data name="Eligibility.Reason.InvalidRequest" xml:space="preserve"><value>Eligibility request is invalid</value></data>
   <data name="Eligibility.Reason.InvalidState" xml:space="preserve"><value>Eligibility state is invalid</value></data>
+  <data name="Eligibility.Reason.LocalAttemptSpacing" xml:space="preserve"><value>Waiting for the local spacing policy before the next planned attempt</value></data>
 </root>

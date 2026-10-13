@@ -194,7 +194,7 @@ public sealed class FormalSlotClaimServiceTests
     }
 
     [Fact]
-    public async Task UnknownExternalUsage_BlocksScheduledClaimAndReturnsCoreDecision()
+    public async Task UnknownExternalUsage_AllowsLocalScheduledClaimAndReturnsCoreExplanation()
     {
         var fixture = CreateFixture(
             AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(7, 1)),
@@ -202,10 +202,11 @@ public sealed class FormalSlotClaimServiceTests
 
         var result = await fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None);
 
-        Assert.Equal(SlotClaimKind.Blocked, result.Kind);
-        Assert.Equal(EligibilityStatus.Unknown, result.EligibilityDecision!.Status);
-        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, result.EligibilityDecision.Reason);
-        Assert.Empty(fixture.StateStore.State.FormalSlots);
+        Assert.Equal(SlotClaimKind.Claimed, result.Kind);
+        Assert.Equal(EligibilityStatus.Eligible, result.EligibilityDecision!.Status);
+        Assert.Equal(EligibilityReason.Ready, result.EligibilityDecision.Reason);
+        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, result.EligibilityDecision.ExplanationReason);
+        Assert.Single(fixture.StateStore.State.FormalSlots);
     }
 
     [Fact]
@@ -341,7 +342,7 @@ public sealed class FormalSlotClaimServiceTests
     }
 
     [Fact]
-    public async Task ConfirmedTestNowCanClaimWhileExternalUsageIsUnknown_AndKeepsSchedulerBlocked()
+    public async Task ConfirmedTestNowCanClaimWhileExternalUsageIsUnknown_AndSchedulerUsesLocalPolicy()
     {
         var now = AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(7, 1));
         var fixture = CreateFixture(now, state: StateDocument.Empty());
@@ -377,8 +378,10 @@ public sealed class FormalSlotClaimServiceTests
 
         fixture.Clock.Now = now.AddMinutes(1);
         var scheduled = await fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None);
-        Assert.Equal(EligibilityStatus.Unknown, scheduled.EligibilityDecision!.Status);
-        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, scheduled.EligibilityDecision.Reason);
+        Assert.True(scheduled.IsClaimed);
+        Assert.Equal(EligibilityStatus.Eligible, scheduled.EligibilityDecision!.Status);
+        Assert.Equal(EligibilityReason.Ready, scheduled.EligibilityDecision.Reason);
+        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, scheduled.EligibilityDecision.ExplanationReason);
         Assert.True(fixture.StateStore.State.Eligibility!.ExternalManualUsageUnknown);
     }
 

@@ -2,6 +2,8 @@ namespace CodexSlotPing.Core.Eligibility;
 
 public sealed class EligibilityEvaluator : IEligibilityEvaluator
 {
+    private static readonly TimeSpan LocalAttemptSpacing = TimeSpan.FromHours(5);
+
     public EligibilityDecision Evaluate(EligibilityState state, EligibilityRequest request)
     {
         ArgumentNullException.ThrowIfNull(state);
@@ -86,20 +88,54 @@ public sealed class EligibilityEvaluator : IEligibilityEvaluator
                     request.Intent,
                     EligibilityStatus.Eligible,
                     EligibilityReason.TestNowExplicitlyConfirmed,
-                    observationSource: ObservationSource.AppTestNow)
+                    confidence: state.ExternalManualUsageUnknown ? Confidence.Medium : Confidence.Unknown,
+                    observationSource: ObservationSource.AppTestNow,
+                    explanationReason: state.ExternalManualUsageUnknown
+                        ? EligibilityReason.ExternalManualUsageUnknown
+                        : null)
                 : Decision(
                     request.Intent,
                     EligibilityStatus.ConfirmationRequired,
                     EligibilityReason.TestNowConfirmationRequired,
-                    requiresConfirmation: true);
+                    confidence: state.ExternalManualUsageUnknown ? Confidence.Medium : Confidence.Unknown,
+                    requiresConfirmation: true,
+                    explanationReason: state.ExternalManualUsageUnknown
+                        ? EligibilityReason.ExternalManualUsageUnknown
+                        : null);
+        }
+
+        var latestLocalUseAtUtc = Later(
+            state.LastAttemptAtUtc?.ToUniversalTime(),
+            state.LastConfirmedSuccessAtUtc?.ToUniversalTime());
+        if (latestLocalUseAtUtc is { } localUseAtUtc)
+        {
+            var nextLocalAttemptAtUtc = localUseAtUtc.Add(LocalAttemptSpacing);
+            if (nowUtc < nextLocalAttemptAtUtc)
+            {
+                return Decision(
+                    request.Intent,
+                    EligibilityStatus.NotYetEligible,
+                    EligibilityReason.LocalAttemptSpacing,
+                    nextEligibleAtUtc: nextLocalAttemptAtUtc,
+                    confidence: state.ExternalManualUsageUnknown ? Confidence.Medium : Confidence.High,
+                    observationSource: state.ExternalManualUsageUnknown
+                        ? ObservationSource.Unknown
+                        : FindLocalObservationSource(state, localUseAtUtc),
+                    explanationReason: state.ExternalManualUsageUnknown
+                        ? EligibilityReason.ExternalManualUsageUnknown
+                        : null);
+            }
         }
 
         if (state.ExternalManualUsageUnknown)
         {
             return Decision(
                 request.Intent,
-                EligibilityStatus.Unknown,
-                EligibilityReason.ExternalManualUsageUnknown);
+                EligibilityStatus.Eligible,
+                EligibilityReason.Ready,
+                confidence: Confidence.Medium,
+                observationSource: ObservationSource.Unknown,
+                explanationReason: EligibilityReason.ExternalManualUsageUnknown);
         }
 
         return Decision(
@@ -119,6 +155,19 @@ public sealed class EligibilityEvaluator : IEligibilityEvaluator
 
         return observation.TrustedResetAtUtc.Value.ToUniversalTime();
     }
+
+    private static DateTimeOffset? Later(DateTimeOffset? first, DateTimeOffset? second) =>
+        first is null ? second : second is null ? first : first.Value >= second.Value ? first : second;
+
+    private static ObservationSource FindLocalObservationSource(EligibilityState state, DateTimeOffset observedAtUtc) =>
+        state.Observations
+            .Where(observation =>
+                observation.Kind is EligibilityObservationKind.AttemptStarted or EligibilityObservationKind.ConfirmedSuccess &&
+                observation.ObservedAtUtc.ToUniversalTime() == observedAtUtc)
+            .OrderByDescending(observation => observation.ObservedAtUtc)
+            .Select(observation => observation.Source)
+            .DefaultIfEmpty(ObservationSource.Unknown)
+            .First();
 
     private static EligibilityDecision EvaluateUsageLimit(
         EligibilityRequest request,
@@ -173,7 +222,8 @@ public sealed class EligibilityEvaluator : IEligibilityEvaluator
         DateTimeOffset? nextEligibleAtUtc = null,
         Confidence confidence = Confidence.Unknown,
         ObservationSource observationSource = ObservationSource.Unknown,
-        bool requiresConfirmation = false) =>
+        bool requiresConfirmation = false,
+        EligibilityReason? explanationReason = null) =>
         new(
             EligibilityDecision.CurrentSchemaVersion,
             intent,
@@ -182,5 +232,6 @@ public sealed class EligibilityEvaluator : IEligibilityEvaluator
             nextEligibleAtUtc?.ToUniversalTime(),
             confidence,
             observationSource,
-            requiresConfirmation);
+            requiresConfirmation,
+            explanationReason);
 }
