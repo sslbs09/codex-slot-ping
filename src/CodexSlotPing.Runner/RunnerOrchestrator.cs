@@ -357,14 +357,14 @@ public sealed class RunnerOrchestrator
                     return false;
                 }
 
+                var finalizedAtUtc = _clock.UtcNow.ToUniversalTime();
                 var records = state.FormalSlots.ToArray();
                 records[index] = current with
                 {
                     Status = nextStatus,
-                    UpdatedAtUtc = _clock.UtcNow.ToUniversalTime(),
+                    UpdatedAtUtc = finalizedAtUtc,
                     DiagnosticCategory = result.DiagnosticCategory
                 };
-                var finalizedAtUtc = _clock.UtcNow.ToUniversalTime();
                 var eligibility = state.Eligibility
                     ?? throw new InvalidDataException("The state document is missing eligibility state.");
                 var observations = eligibility.Observations.ToList();
@@ -401,6 +401,10 @@ public sealed class RunnerOrchestrator
                 }
 
                 var highestObservedAtUtc = Later(state.HighestObservedUtc, finalizedAtUtc);
+                if (attemptStartedAtUtc is { } observedAttemptAtUtc)
+                {
+                    highestObservedAtUtc = Later(highestObservedAtUtc, observedAttemptAtUtc);
+                }
 
                 var finalizedEligibility = eligibility with
                 {

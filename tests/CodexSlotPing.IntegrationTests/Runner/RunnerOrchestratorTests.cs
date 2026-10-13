@@ -38,6 +38,25 @@ public sealed class RunnerOrchestratorTests
     }
 
     [Fact]
+    public async Task ClockRollbackDuringRequest_PreservesAttemptStartInHighWaterMark()
+    {
+        var attemptStartedAtUtc = AtLocal(TestDate, new TimeOnly(7, 1));
+        var fixture = CreateFixture(attemptStartedAtUtc);
+        fixture.Launcher.OnRun = () => fixture.Clock.SetUtcNow(attemptStartedAtUtc.AddSeconds(-30));
+
+        var exitCode = await fixture.CreateRunner().RunFormalSlotAsync(CancellationToken.None);
+
+        Assert.Equal(RunnerExitCode.ConfirmedSuccess, exitCode);
+        Assert.Equal(attemptStartedAtUtc, fixture.StateStore.State.Eligibility!.LastAttemptAtUtc);
+        Assert.Equal(attemptStartedAtUtc, fixture.StateStore.State.HighestObservedUtc);
+        Assert.Equal(attemptStartedAtUtc, fixture.StateStore.State.Eligibility.HighestObservedUtc);
+        var rolledBackDecision = new EligibilityEvaluator().Evaluate(
+            fixture.StateStore.State.Eligibility,
+            EligibilityRequest.Scheduled(attemptStartedAtUtc.AddSeconds(-15)));
+        Assert.Equal(EligibilityReason.ClockRollback, rolledBackDecision.Reason);
+    }
+
+    [Fact]
     public async Task UsesConfigurationSnapshotThatWasValidatedByTheDurableClaim()
     {
         var fixture = CreateFixture(AtLocal(TestDate, new TimeOnly(7, 1)));
@@ -446,7 +465,9 @@ public sealed class RunnerOrchestratorTests
 
     private sealed class FixedClock(DateTimeOffset now) : IClock
     {
-        public DateTimeOffset UtcNow => now;
+        public DateTimeOffset UtcNow { get; private set; } = now;
+
+        public void SetUtcNow(DateTimeOffset value) => UtcNow = value.ToUniversalTime();
     }
 
     private sealed class FixedTimeZoneProvider : ITimeZoneProvider
@@ -551,6 +572,7 @@ public sealed class RunnerOrchestratorTests
         public int CallCount { get; private set; }
         public bool ClaimedAtLaunch { get; private set; }
         public CodexInvocationRequest? LastRequest { get; private set; }
+        public Action? OnRun { get; set; }
         public Task<CodexInvocationResult> RunAsync(CodexInvocationRequest request, CancellationToken cancellationToken)
         {
             CallCount++;
@@ -561,6 +583,7 @@ public sealed class RunnerOrchestratorTests
             {
                 throw new InvalidOperationException("The launcher did not receive an existing empty working directory.");
             }
+            OnRun?.Invoke();
             return Task.FromResult(result);
         }
     }
