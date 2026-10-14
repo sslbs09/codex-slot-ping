@@ -1,11 +1,15 @@
 using CodexSlotPing.App;
 using CodexSlotPing.Core.Codex;
+using CodexSlotPing.Core.Concurrency;
 using CodexSlotPing.Core.Configuration;
-using CodexSlotPing.Core.Scheduler;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Slots;
+using CodexSlotPing.Core.Scheduler;
 using CodexSlotPing.Core.State;
 using CodexSlotPing.Core.Testing;
 using CodexSlotPing.Core.Time;
+using CodexSlotPing.App.ReadModels;
+using System.Globalization;
 
 namespace CodexSlotPing.IntegrationTests.App;
 
@@ -15,6 +19,48 @@ public sealed class AppControllerTests
     private const string RunnerPath = @"C:\portable\CodexSlotPing.Runner.exe";
 
     [Fact]
+    public async Task RefreshAsync_ReturnsAppOwnedReadModelsInsteadOfCoreFacts()
+    {
+        var config = AppConfigDefaults.Create() with { Model = "gpt-read-model-test" };
+        var fixture = new Fixture(config,
+            Status(SchedulerState.OFF, exists: false, owned: false, enabled: false, RunnerPath));
+        fixture.StateStore.SetState(StateDocument.Empty() with
+        {
+            LastTest = new TestRunRecord("test-123", Now.AddMinutes(-20), "gpt-read-model-test", "high",
+                "confirmed-success", 12_345, 0)
+        });
+
+        var screen = await fixture.Controller.RefreshAsync(CancellationToken.None);
+
+        var readModelTypes = new[]
+        {
+            typeof(AppScreenState), typeof(AutomationView), typeof(EligibilityView), typeof(ScheduleView),
+            typeof(SchedulerView), typeof(CodexEnvironmentView), typeof(NextSlotView), typeof(TodaySlotView),
+            typeof(LatestKnownResultView)
+        };
+        Assert.Empty(readModelTypes
+            .SelectMany(type => type.GetProperties())
+            .Where(property => HasCoreType(property.PropertyType))
+            .Select(property => property.Name));
+
+        Assert.Equal("gpt-read-model-test", screen.Automation.Model);
+        Assert.True(screen.Automation.Enabled);
+        Assert.Equal(EligibilityViewStatus.Eligible, screen.Eligibility.Status);
+        Assert.False(string.IsNullOrWhiteSpace(screen.Eligibility.Reason));
+        Assert.False(string.IsNullOrWhiteSpace(screen.Eligibility.Confidence));
+        Assert.NotNull(screen.Schedule.NextAttemptAtUtc);
+        Assert.Equal(
+            screen.Schedule.NextAttemptAtUtc!.Value.ToLocalTime().ToString("g", CultureInfo.CurrentUICulture),
+            screen.Eligibility.NextPlannedAttemptText);
+        Assert.Equal(SchedulerViewState.Disabled, screen.Scheduler.State);
+        Assert.Equal("confirmed-success", screen.LatestKnownResult!.ResultCategory);
+
+        static bool HasCoreType(Type type) =>
+            type.Namespace?.StartsWith("CodexSlotPing.Core", StringComparison.Ordinal) == true ||
+            type.GetGenericArguments().Any(HasCoreType);
+    }
+
+    [Fact]
     public async Task RefreshAsync_UsesSchedulerReadbackInsteadOfConfigEnabledFlag()
     {
         var fixture = new Fixture(AppConfigDefaults.Create() with { Enabled = true },
@@ -22,7 +68,7 @@ public sealed class AppControllerTests
 
         var state = await fixture.Controller.RefreshAsync(CancellationToken.None);
 
-        Assert.Equal(SchedulerState.OFF, state.Scheduler.State);
+        Assert.Equal(SchedulerViewState.Disabled, state.Scheduler.State);
         Assert.False(state.Scheduler.Exists);
         Assert.Equal(1, fixture.Scheduler.ReadCount);
     }
@@ -35,7 +81,10 @@ public sealed class AppControllerTests
             var initial = Status(enabled ? SchedulerState.ON : SchedulerState.OFF,
                 exists: true, owned: true, enabled, RunnerPath);
             var fixture = new Fixture(AppConfigDefaults.Create(), initial);
-            var changed = fixture.ConfigStore.Config with { Prompt = "Updated prompt." };
+            var changed = AppStatusProjection.ProjectAutomation(fixture.ConfigStore.Config) with
+            {
+                Prompt = "Updated prompt."
+            };
 
             var result = await fixture.Controller.SaveSettingsAsync(changed, CancellationToken.None);
 
@@ -47,41 +96,282 @@ public sealed class AppControllerTests
     }
 
     [Fact]
+    public async Task SaveSettingsAsync_PreservesPauseIntentFromCurrentConfig()
+    {
+        var fixture = new Fixture(
+            AppConfigDefaults.Create() with { Enabled = true, IsPaused = true },
+            Status(SchedulerState.OWNED_DISABLED, exists: true, owned: true, enabled: false, RunnerPath));
+        var staleView = AppStatusProjection.ProjectAutomation(fixture.ConfigStore.Config) with
+        {
+            IsPaused = false,
+            Prompt = "Updated while paused."
+        };
+
+        var result = await fixture.Controller.SaveSettingsAsync(staleView, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(fixture.ConfigStore.Config.Enabled);
+        Assert.True(fixture.ConfigStore.Config.IsPaused);
+        Assert.False(Assert.Single(fixture.Scheduler.Definitions).Enabled);
+    }
+
+    [Fact]
+    public async Task PauseAutomation_PersistsCoreProtectionWhenSchedulerDisableFails()
+    {
+        var fixture = new Fixture(
+            AppConfigDefaults.Create() with { Enabled = true },
+            Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath));
+        fixture.Scheduler.FailDisable = true;
+
+        var operation = await fixture.Controller.PauseAutomationAsync(CancellationToken.None);
+        var scheduledClaim = await fixture.ClaimService.TryClaimScheduledAttemptAsync(CancellationToken.None);
+        var testNow = await fixture.ClaimService.TryClaimTestNowAsync(
+            "pause-flow-test-now", userConfirmed: true, CancellationToken.None);
+
+        Assert.False(operation.Succeeded);
+        Assert.True(fixture.ConfigStore.Config.Enabled);
+        Assert.True(fixture.ConfigStore.Config.IsPaused);
+        Assert.Equal(SlotClaimBlockReason.AutomationPaused, scheduledClaim.BlockReason);
+        Assert.True(testNow.IsClaimed);
+        var screen = await fixture.Controller.RefreshAsync(CancellationToken.None);
+        Assert.True(screen.Automation.IsPaused);
+        Assert.Equal(SchedulerViewState.Error, screen.Scheduler.State);
+        Assert.Equal("scheduler-enabled-while-paused", screen.Scheduler.DiagnosticCategory);
+    }
+
+    [Fact]
+    public async Task PausePersistenceAndSchedulerDisableFailure_ReportsTemporaryProtectionAndKeepsTestNowAvailable()
+    {
+        using var uiCulture = UseUiCulture("zh-CN");
+        var fixture = new Fixture(
+            AppConfigDefaults.Create() with { Enabled = true },
+            Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath));
+        fixture.ConfigStore.SaveFailure = new IOException("injected config write failure");
+        fixture.Scheduler.FailDisable = true;
+
+        var operation = await fixture.Controller.PauseAutomationAsync(CancellationToken.None);
+        var scheduledClaim = await fixture.ClaimService.TryClaimScheduledAttemptAsync(CancellationToken.None);
+        var testNow = await fixture.ClaimService.TryClaimTestNowAsync(
+            "temporary-pause-test-now", userConfirmed: true, CancellationToken.None);
+        var screen = await fixture.Controller.RefreshAsync(CancellationToken.None);
+        var tray = TraySummaryProjection.Create(screen, CultureInfo.GetCultureInfo("zh-CN"));
+        var failureMessage = UiText.FormatDiagnostic(
+            operation.DiagnosticCategory,
+            CultureInfo.GetCultureInfo("zh-CN"));
+
+        Assert.False(operation.Succeeded);
+        Assert.Equal("automation-pause-not-persisted-protected", operation.DiagnosticCategory);
+        Assert.Contains("暂停未能保存", failureMessage);
+        Assert.Contains("当前进程", failureMessage);
+        Assert.Contains("关闭应用后该保护不会保留", failureMessage);
+        Assert.False(fixture.ConfigStore.Config.IsPaused);
+        Assert.False(screen.Automation.IsPaused);
+        Assert.True(screen.Automation.IsPauseProtectionActive);
+        Assert.Equal(SlotClaimBlockReason.AutomationPaused, scheduledClaim.BlockReason);
+        Assert.True(testNow.IsClaimed);
+        Assert.Null(screen.Schedule.NextAttemptAtUtc);
+        Assert.True(screen.Schedule.IsDeferredUntilResume);
+        Assert.Contains("恢复后重新计算计划", screen.Eligibility.Details);
+        Assert.Contains("暂停未持久化", tray.Menu.AutomationControlText);
+        Assert.Equal(SchedulerViewState.Error, screen.Scheduler.State);
+        Assert.Equal("scheduler-enabled-while-paused", screen.Scheduler.DiagnosticCategory);
+        Assert.Equal(TraySummaryStatus.SchedulerError, tray.Status);
+        Assert.NotEqual(TraySummaryStatus.Paused, tray.Status);
+    }
+
+    [Fact]
+    public async Task ResumeAutomation_ClearsTemporaryProtectionAfterFreshPlanIsWritten()
+    {
+        var fixture = new Fixture(
+            AppConfigDefaults.Create() with { Enabled = true },
+            Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath));
+        fixture.ConfigStore.SaveFailure = new IOException("injected config write failure");
+
+        var pause = await fixture.Controller.PauseAutomationAsync(CancellationToken.None);
+        var protectedClaim = await fixture.ClaimService.TryClaimScheduledAttemptAsync(CancellationToken.None);
+        fixture.ConfigStore.SaveFailure = null;
+
+        var resume = await fixture.Controller.ResumeAutomationAsync(CancellationToken.None);
+        var resumedClaim = await fixture.ClaimService.TryClaimScheduledAttemptAsync(CancellationToken.None);
+
+        Assert.False(pause.Succeeded);
+        Assert.Equal(SlotClaimBlockReason.AutomationPaused, protectedClaim.BlockReason);
+        Assert.True(resume.Succeeded);
+        Assert.Equal(2, fixture.Scheduler.Definitions.Count);
+        Assert.False(fixture.Scheduler.Definitions[0].Enabled);
+        Assert.True(fixture.Scheduler.Definitions[1].Enabled);
+        Assert.True(resumedClaim.IsClaimed);
+    }
+
+    [Fact]
+    public async Task Refresh_WhenPersistentlyPaused_HidesPlanAndExplainsRecalculationOnResume()
+    {
+        using var uiCulture = UseUiCulture("zh-CN");
+        var fixture = new Fixture(
+            AppConfigDefaults.Create() with { Enabled = true, IsPaused = true },
+            Status(SchedulerState.OWNED_DISABLED, exists: true, owned: true, enabled: false, RunnerPath));
+
+        var screen = await fixture.Controller.RefreshAsync(CancellationToken.None);
+        var tray = TraySummaryProjection.Create(screen, CultureInfo.GetCultureInfo("zh-CN"));
+
+        Assert.Null(screen.Schedule.NextAttemptAtUtc);
+        Assert.True(screen.Automation.IsPaused);
+        Assert.True(screen.Automation.IsPauseProtectionActive);
+        Assert.True(screen.Schedule.IsDeferredUntilResume);
+        Assert.Contains("恢复后重新计算计划", screen.Eligibility.Details);
+        Assert.Equal("自动调度已暂停 · 恢复后重新计算计划", tray.StatusSummary);
+    }
+
+    private static IDisposable UseUiCulture(string cultureName)
+    {
+        var previousCulture = CultureInfo.CurrentUICulture;
+        CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(cultureName);
+        return new UiCultureScope(previousCulture);
+    }
+
+    private sealed class UiCultureScope(CultureInfo previousCulture) : IDisposable
+    {
+        public void Dispose() => CultureInfo.CurrentUICulture = previousCulture;
+    }
+
+    [Fact]
+    public async Task ResumeAutomation_WritesFreshPlanBeforeClearingPause()
+    {
+        var oldTriggerAt = Now.AddHours(1);
+        var disabledScheduler = Status(SchedulerState.OWNED_DISABLED,
+            exists: true, owned: true, enabled: false, RunnerPath);
+        disabledScheduler = disabledScheduler with
+        {
+            Readback = disabledScheduler.Readback! with
+            {
+                Triggers = [new SchedulerTriggerReadback(
+                    1, false, true, 0,
+                    oldTriggerAt.ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz"),
+                    oldTriggerAt.AddDays(3650).ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz"))]
+            }
+        };
+        var fixture = new Fixture(
+            AppConfigDefaults.Create() with { Enabled = true, IsPaused = true },
+            disabledScheduler);
+        fixture.Clock.Now = Now.AddMinutes(2);
+        fixture.StateStore.SetState(StateDocument.Empty() with
+        {
+            Eligibility = EligibilityState.Empty() with
+            {
+                ExternalManualUsageUnknown = false,
+                LastConfirmedSuccessAtUtc = fixture.Clock.Now.AddHours(-2)
+            }
+        });
+        var expectedFreshPlan = fixture.Clock.Now.AddHours(3);
+
+        var operation = await fixture.Controller.ResumeAutomationAsync(CancellationToken.None);
+
+        var definitions = fixture.Scheduler.Definitions;
+        Assert.True(operation.Succeeded);
+        Assert.Equal(2, definitions.Count);
+        Assert.Equal(new[] { true, false }, fixture.Scheduler.PausedAtUpdates);
+        Assert.False(definitions[0].Enabled);
+        Assert.True(definitions[1].Enabled);
+        Assert.Equal(definitions[0].SchedulePlan, definitions[1].SchedulePlan);
+        Assert.NotEqual(oldTriggerAt, definitions[0].SchedulePlan.OneShotTriggerAtUtc);
+        Assert.Equal(expectedFreshPlan, definitions[0].SchedulePlan.OneShotTriggerAtUtc);
+        Assert.False(fixture.ConfigStore.Config.IsPaused);
+        Assert.True(fixture.ConfigStore.Config.Enabled);
+    }
+
+    [Fact]
+    public async Task ResumeAutomation_RestoresPauseIfSchedulerEnableFails()
+    {
+        var fixture = new Fixture(
+            AppConfigDefaults.Create() with { Enabled = true, IsPaused = true },
+            Status(SchedulerState.OWNED_DISABLED, exists: true, owned: true, enabled: false, RunnerPath));
+        fixture.Scheduler.FailInstallOnCall = 2;
+
+        var operation = await fixture.Controller.ResumeAutomationAsync(CancellationToken.None);
+        var scheduledClaim = await fixture.ClaimService.TryClaimScheduledAttemptAsync(CancellationToken.None);
+
+        Assert.False(operation.Succeeded);
+        Assert.True(fixture.ConfigStore.Config.IsPaused);
+        Assert.Equal(SlotClaimBlockReason.AutomationPaused, scheduledClaim.BlockReason);
+        Assert.False(fixture.Scheduler.Current.IsEnabled);
+        Assert.Equal(2, fixture.Scheduler.Definitions.Count);
+    }
+
+    [Fact]
     public async Task RefreshAsync_ReportsPathAndTimeZoneDrift()
     {
         var pathFixture = new Fixture(AppConfigDefaults.Create(),
             Status(SchedulerState.ON, exists: true, owned: true, enabled: true, @"C:\old\CodexSlotPing.Runner.exe"));
         var pathState = await pathFixture.Controller.RefreshAsync(CancellationToken.None);
-        Assert.Equal(SchedulerState.NEEDS_REPAIR, pathState.Scheduler.State);
+        Assert.Equal(SchedulerViewState.NeedsRepair, pathState.Scheduler.State);
         Assert.Contains("runner-action-mismatch", pathState.Scheduler.ContractMismatches);
 
         var lockedConfig = AppConfigDefaults.Create() with { TimeZone = "America/New_York" };
         var timezoneFixture = new Fixture(lockedConfig,
             Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath));
         var timezoneState = await timezoneFixture.Controller.RefreshAsync(CancellationToken.None);
-        Assert.Equal(SchedulerState.TIMEZONE_CHANGED, timezoneState.Scheduler.State);
+        Assert.Equal(SchedulerViewState.TimezoneChanged, timezoneState.Scheduler.State);
         Assert.Equal("timezone-mismatch", timezoneState.Scheduler.DiagnosticCategory);
     }
 
     [Fact]
-    public async Task RefreshAsync_ReportsOwnedTaskTriggerTimeDrift()
+    public async Task RefreshAsync_ReplacesLegacyDailyTriggersWithCurrentOneShotPlan()
     {
         var config = AppConfigDefaults.Create();
         var initial = Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath);
-        var changedTimes = new[]
-        {
-            new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T07:00:00"),
-            new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T12:02:00"),
-            new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T17:01:00"),
-            new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T22:01:00")
-        };
+        var changedTimes = new[] { new SchedulerTriggerReadback(2, true, true, 1, "2099-01-01T07:00:00") };
         var status = initial with { Readback = initial.Readback! with { Triggers = changedTimes } };
         var fixture = new Fixture(config, status);
 
         var state = await fixture.Controller.RefreshAsync(CancellationToken.None);
 
-        Assert.Equal(SchedulerState.NEEDS_REPAIR, state.Scheduler.State);
-        Assert.Contains("trigger-times-mismatch", state.Scheduler.ContractMismatches);
+        Assert.Equal(SchedulerViewState.Enabled, state.Scheduler.State);
+        var definition = Assert.Single(fixture.Scheduler.Definitions);
+        Assert.NotNull(definition.SchedulePlan.OneShotTriggerAtUtc);
+        Assert.Single(fixture.Scheduler.Current.Readback!.Triggers);
+        Assert.True(fixture.Scheduler.Current.Readback.Triggers[0].IsOneShot);
+    }
+
+    [Fact]
+    public async Task ExternalUsageUnknown_StillProducesLocalOneShotPlan()
+    {
+        var fixture = new Fixture(AppConfigDefaults.Create(),
+            Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath));
+
+        var state = await fixture.Controller.RefreshAsync(CancellationToken.None);
+
+        Assert.Equal(EligibilityViewStatus.Eligible, state.Eligibility.Status);
+        Assert.Contains(UiText.Get("Eligibility.Reason.ExternalManualUsageUnknown"), state.Eligibility.DetailsText);
+        Assert.NotNull(state.Schedule.NextAttemptAtUtc);
+        Assert.True(Assert.Single(fixture.Scheduler.Definitions).SchedulePlan.OneShotTriggerAtUtc.HasValue);
+    }
+
+    [Fact]
+    public async Task UsageLimitWithoutTrustedReset_ProducesNoTrigger()
+    {
+        var fixture = new Fixture(AppConfigDefaults.Create(),
+            Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath));
+        var observedAt = Now.AddMinutes(-5);
+        var usageLimit = new EligibilityObservation(
+            EligibilityObservationKind.UsageLimitReached,
+            observedAt,
+            ObservationSource.AppScheduled,
+            Confidence.High);
+        fixture.StateStore.SetState(StateDocument.Empty() with
+        {
+            HighestObservedUtc = Now,
+            Eligibility = EligibilityState.Empty() with
+            {
+                HighestObservedUtc = Now,
+                Observations = [usageLimit]
+            }
+        });
+
+        var state = await fixture.Controller.RefreshAsync(CancellationToken.None);
+
+        Assert.Equal(EligibilityViewStatus.Blocked, state.Eligibility.Status);
+        Assert.Null(state.Schedule.NextAttemptAtUtc);
+        Assert.Empty(fixture.Scheduler.Definitions);
     }
 
     [Fact]
@@ -96,6 +386,52 @@ public sealed class AppControllerTests
         var result = await fixture.Controller.RunTestNowAsync(true, CancellationToken.None);
         Assert.NotNull(result);
         Assert.Equal(1, fixture.TestNowCallCount);
+        Assert.NotNull(result!.Result);
+    }
+
+    [Fact]
+    public async Task UiAndRunnerUseTheSameScheduledDecisionReason()
+    {
+        var fixture = new Fixture(AppConfigDefaults.Create(),
+            Status(SchedulerState.OFF, exists: false, owned: false, enabled: false, RunnerPath));
+
+        var screen = await fixture.Controller.RefreshAsync(CancellationToken.None);
+        var runnerClaim = await fixture.ClaimService.TryClaimCurrentSlotAsync(CancellationToken.None);
+
+        Assert.Equal(EligibilityViewStatus.Eligible, screen.Eligibility.Status);
+        Assert.Contains(UiText.Get("Eligibility.Reason.Ready"), screen.Eligibility.DetailsText);
+        Assert.Contains(UiText.Get("Eligibility.Reason.ExternalManualUsageUnknown"), screen.Eligibility.DetailsText);
+        Assert.Equal(screen.Eligibility.Reason,
+            UiText.Get($"Eligibility.Reason.{runnerClaim.EligibilityDecision!.Reason}"));
+    }
+
+    [Fact]
+    public async Task StaleTestNowDecisionCannotBypassNewClockRollbackState()
+    {
+        var fixture = new Fixture(AppConfigDefaults.Create(),
+            Status(SchedulerState.OFF, exists: false, owned: false, enabled: false, RunnerPath));
+        var preview = await fixture.Controller.GetTestNowEligibilityViewAsync(CancellationToken.None);
+        Assert.True(preview.RequiresConfirmation);
+
+        var highWater = Now.AddMinutes(5);
+        fixture.StateStore.SetState(StateDocument.Empty() with
+        {
+            HighestObservedUtc = highWater,
+            Eligibility = EligibilityState.Empty() with { HighestObservedUtc = highWater }
+        });
+        fixture.TestNowRunner = async (testId, cancellationToken) =>
+        {
+            var claim = await fixture.ClaimService.TryClaimTestNowAsync(testId, userConfirmed: true, cancellationToken);
+            return new TestNowRunResponse(claim.EligibilityDecision!, null);
+        };
+
+        var response = await fixture.Controller.RunTestNowAsync(true, CancellationToken.None);
+
+        Assert.NotNull(response);
+        Assert.Null(response!.Result);
+        Assert.Contains(UiText.Get("Eligibility.Reason.ClockRollback"), response.Decision.DetailsText);
+        Assert.Null(fixture.StateStore.State.ActiveTestNowClaim);
+        Assert.False(fixture.StateStore.State.Eligibility!.HasUnresolvedClaim);
     }
 
     [Fact]
@@ -103,7 +439,10 @@ public sealed class AppControllerTests
     {
         var fixture = new Fixture(AppConfigDefaults.Create(),
             Status(SchedulerState.OFF, exists: false, owned: false, enabled: false, RunnerPath));
-        var invalid = fixture.ConfigStore.Config with { Slots = ["bad", "12:01", "17:01", "22:01"] };
+        var invalid = AppStatusProjection.ProjectAutomation(fixture.ConfigStore.Config) with
+        {
+            LegacyFixedSlots = ["bad", "12:01", "17:01", "22:01"]
+        };
 
         var result = await fixture.Controller.SaveSettingsAsync(invalid, CancellationToken.None);
 
@@ -163,11 +502,18 @@ public sealed class AppControllerTests
             var timeZone = new FixedTimeZoneProvider();
             EnvironmentDetector = new ReadyEnvironmentDetector();
             Scheduler = new MemoryScheduler(schedulerStatus, RunnerPath);
+            Scheduler.IsPaused = () => ConfigStore.Config.IsPaused;
+            StateStore = new MemoryStateStore();
+            Mutex = new RecordingStateMutex();
+            Clock = new FixedClock(Now);
+            ClaimService = new FormalSlotClaimService(Clock, timeZone, ConfigStore, StateStore, Mutex,
+                new SlotAdmissionEvaluator(timeZone), new EligibilityEvaluator());
             Controller = new AppController(
-                new FixedClock(Now),
+                Clock,
                 timeZone,
                 ConfigStore,
-                new MemoryStateStore(),
+                StateStore,
+                ClaimService,
                 Scheduler,
                 EnvironmentDetector,
                 RunnerPath,
@@ -178,23 +524,38 @@ public sealed class AppControllerTests
         public MemoryConfigStore ConfigStore { get; }
         public MemoryScheduler Scheduler { get; }
         public ReadyEnvironmentDetector EnvironmentDetector { get; }
+        public MemoryStateStore StateStore { get; }
+        public RecordingStateMutex Mutex { get; }
+        public FixedClock Clock { get; }
+        public FormalSlotClaimService ClaimService { get; }
         public AppController Controller { get; }
         public int TestNowCallCount { get; private set; }
+        public Func<string, CancellationToken, Task<TestNowRunResponse>>? TestNowRunner { get; set; }
 
-        private Task<TestRunResult> RunTestNowAsync(AppConfig config, CancellationToken cancellationToken)
+        private Task<TestNowRunResponse> RunTestNowAsync(string testId, CancellationToken cancellationToken)
         {
             TestNowCallCount++;
-            return Task.FromResult(new TestRunResult(
-                "test-id",
-                new CodexInvocationResult(CodexResultClassification.CONFIRMED_SUCCESS, true, 0, 10,
-                    false, null, Array.Empty<string>(), null, null),
-                Now));
+            if (TestNowRunner is not null)
+            {
+                return TestNowRunner(testId, cancellationToken);
+            }
+
+            return Task.FromResult(new TestNowRunResponse(
+                new EligibilityDecision(EligibilityDecision.CurrentSchemaVersion, EligibilityIntent.TestNow,
+                    EligibilityStatus.Eligible, EligibilityReason.Ready, null, Confidence.Unknown,
+                    ObservationSource.Unknown, false),
+                new TestRunResult(
+                    testId,
+                    new CodexInvocationResult(CodexResultClassification.CONFIRMED_SUCCESS, true, 0, 10,
+                        false, null, Array.Empty<string>(), null, null),
+                    Now)));
         }
     }
 
     private sealed class FixedClock(DateTimeOffset now) : IClock
     {
-        public DateTimeOffset UtcNow => now;
+        public DateTimeOffset Now { get; set; } = now;
+        public DateTimeOffset UtcNow => Now;
     }
 
     private sealed class FixedTimeZoneProvider : ITimeZoneProvider
@@ -222,9 +583,15 @@ public sealed class AppControllerTests
     {
         public AppConfig Config { get; private set; } = config;
         public int SaveCount { get; private set; }
+        public Exception? SaveFailure { get; set; }
         public Task<AppConfig> LoadOrCreateAsync(CancellationToken cancellationToken) => Task.FromResult(Config);
         public Task SaveAsync(AppConfig config, CancellationToken cancellationToken)
         {
+            if (SaveFailure is not null)
+            {
+                return Task.FromException(SaveFailure);
+            }
+
             Config = config;
             SaveCount++;
             return Task.CompletedTask;
@@ -233,8 +600,28 @@ public sealed class AppControllerTests
 
     private sealed class MemoryStateStore : IStateStore
     {
-        public Task<StateDocument> LoadAsync(CancellationToken cancellationToken) => Task.FromResult(StateDocument.Empty());
-        public Task SaveAsync(StateDocument state, CancellationToken cancellationToken) => Task.CompletedTask;
+        public StateDocument State { get; private set; } = StateDocument.Empty();
+        public void SetState(StateDocument state) => State = state;
+        public Task<StateDocument> LoadAsync(CancellationToken cancellationToken) => Task.FromResult(State);
+        public Task SaveAsync(StateDocument state, CancellationToken cancellationToken)
+        {
+            State = state;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingStateMutex : IStateMutex
+    {
+        private bool _held;
+        public StateMutexLease? TryAcquire(TimeSpan timeout)
+        {
+            if (_held)
+            {
+                return null;
+            }
+            _held = true;
+            return new StateMutexLease(() => _held = false);
+        }
     }
 
     private sealed class MemoryScheduler(SchedulerStatus initial, string expectedRunner) : ITaskSchedulerGateway
@@ -242,6 +629,10 @@ public sealed class AppControllerTests
         public SchedulerStatus Current { get; private set; } = initial;
         public int ReadCount { get; private set; }
         public List<SchedulerTaskDefinition> Definitions { get; } = [];
+        public List<bool> PausedAtUpdates { get; } = [];
+        public Func<bool>? IsPaused { get; set; }
+        public bool FailDisable { get; set; }
+        public int? FailInstallOnCall { get; set; }
 
         public Task<SchedulerStatus> ReadStatusAsync(string taskPath, string currentRunnerPath,
             string configuredTimeZoneId, CancellationToken cancellationToken)
@@ -254,13 +645,35 @@ public sealed class AppControllerTests
             CancellationToken cancellationToken)
         {
             Definitions.Add(definition);
+            PausedAtUpdates.Add(IsPaused?.Invoke() ?? false);
+            if (FailInstallOnCall == Definitions.Count)
+            {
+                return Task.FromResult(new SchedulerOperationResult(false, "scheduler-update-failed", Current));
+            }
+
+            var readback = Status(definition.Enabled ? SchedulerState.ON : SchedulerState.OFF,
+                exists: true, owned: true, definition.Enabled, expectedRunner).Readback!;
+            var triggerAtUtc = definition.SchedulePlan.OneShotTriggerAtUtc;
+            var triggers = triggerAtUtc is { } at
+                ? new[] { new SchedulerTriggerReadback(1, false, true, 0,
+                    at.ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz"),
+                    at.AddDays(3650).ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz")) }
+                : Array.Empty<SchedulerTriggerReadback>();
             Current = Status(definition.Enabled ? SchedulerState.ON : SchedulerState.OFF,
-                exists: true, owned: true, definition.Enabled, expectedRunner);
+                exists: true, owned: true, definition.Enabled, expectedRunner) with
+            {
+                Readback = readback with { Triggers = triggers }
+            };
             return Task.FromResult(new SchedulerOperationResult(true, null, Current));
         }
 
         public Task<SchedulerOperationResult> DisableAsync(string taskPath, CancellationToken cancellationToken)
         {
+            if (FailDisable)
+            {
+                return Task.FromResult(new SchedulerOperationResult(false, "scheduler-disable-failed", Current));
+            }
+
             Current = Current with { State = SchedulerState.OFF, IsEnabled = false };
             return Task.FromResult(new SchedulerOperationResult(true, null, Current));
         }

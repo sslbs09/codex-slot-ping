@@ -1,45 +1,43 @@
 # Codex Slot Ping
 
-Codex Slot Ping 是一个 Windows 托盘工具和官方 Codex CLI 调度辅助程序。它根据本地观察与调度策略安排请求尝试，并通过官方 Codex CLI 发起真实请求；请求可能计入 Codex 使用额度。
+**Current release: v0.2.0**
 
-当前发布版本是 [v0.1.0](https://github.com/sslbs09/codex-slot-ping/releases/tag/v0.1.0)。对应源代码见 [v0.1.0 tag](https://github.com/sslbs09/codex-slot-ping/tree/v0.1.0)。
+Windows 托盘工具，通过本机已安装并登录的官方 Codex CLI 发起计划请求。真实请求可能计入 Codex 使用额度。
 
-## Features
+## v0.2.0 当前行为
 
-- **Core-owned eligibility**：Core 根据本地持久化的观察和调度策略决定是否允许一次尝试。
-- **Dynamic one-shot scheduling**：Core 为下次计划尝试生成零个或一个 `SchedulePlan`；调度不再依赖固定周期 slots。
-- **Shared Test Now path**：Test Now 与正式调度共享 eligibility 和 claim 路径。用户确认的单次 Test Now 不会解除自动调度阻断。
-- **Windows Task Scheduler integration**：Task Scheduler 仅在计划时间唤醒 Runner，不负责授权请求。
+- App-owned Read Model 汇总状态；Main、Settings 和 Tray 使用一致的状态与说明。
+- Eligibility explainability 展示自动尝试会执行或被阻止的原因。
+- Tray 提供调度状态摘要和 Pause / Resume 入口。
+- Pause 暂停自动调度但保留启用状态；Disabled 表示自动化未启用。恢复时重新计算计划。
+- Test Now 在 Pause 期间仍是用户显式发起的手动路径，可能产生真实 Codex 请求。
+- Core 根据本地状态和调度策略计算**下次计划尝试**（Next planned attempt）。这是计划时间，不是 Codex 额度恢复时间。
+- Windows Task Scheduler 只在计划时间唤醒 Runner；Runner 通过共享 claim/mutex 重新执行 eligibility 检查，只有 claim 成功才会调用官方 Codex CLI。
+- 旧固定 slots 仅用于诊断和迁移，不再生成 Scheduler trigger。
 
-## How it works
+如果保存 Pause 状态失败，当前会话会临时阻止自动尝试；App 或 Windows 重启后，该保护不再保留，需要重新确认暂停状态。
 
-`Core decision → SchedulePlan → Windows Task Scheduler → Runner → Claim / eligibility re-check → official Codex CLI`
+## 架构
 
-Core 计算 eligibility 并生成计划；Task Scheduler 按计划唤醒 Runner。Runner 检查任务状态，通过共享 claim 再次校验 eligibility；只有 claim 成功后才调用官方 Codex CLI。
+Eligibility Core → SchedulePlan → Windows Task Scheduler → Runner → Claim/Evaluation → Codex CLI
 
-## Limitations
+Scheduler 只负责唤醒 Runner；Scheduler trigger 本身不是执行许可。详情见[架构说明](docs/architecture.md)。
 
-- 不使用私有 API。
-- 不预测 Codex quota reset。
-- 不读取此应用之外的 Codex 使用情况。
-- 不判断 weekly quota 是否耗尽。
-- 观察到 usage limit 且没有可信 reset 时，自动调度阻断，不创建下一次 trigger。
-- “下次计划尝试”是本地策略计算结果，不代表额度恢复时间。
+## 已知限制
 
-## Installation
+- 应用外手动使用 Codex 不可观测；本地计划时间不代表额度恢复时间。
+- 应用没有完整的 execution history。
+- 保存 Pause 状态失败时的临时保护不跨 App 或 Windows 重启。
+- 本应用不是 Task Runtime 或 Provider framework。
 
-1. 下载 [v0.1.0 Windows x64 Release ZIP](https://github.com/sslbs09/codex-slot-ping/releases/download/v0.1.0/CodexSlotPing-v0.1.0-win-x64.zip) 并解压。
-2. 确保本机已安装并登录官方 Codex CLI。
-3. 运行 `CodexSlotPing.App.exe`，配置并启用计划任务。
+## 验证
 
-## Development
+发布收口验证：Core 157/157、Integration 104/104；自包含 win-x64 发布包和元数据核对结果见 [v0.2.0 release notes](docs/releases/v0.2.0.md)。
 
-- Windows、WPF、.NET 10。
-- 运行测试：`dotnet test CodexSlotPing.sln --no-restore`
-- v0.1.0 验证：Core 152/152、Integration 78/78，共 230 tests passed。
+## 文档
 
-## Documentation
-
-- [Architecture](https://github.com/sslbs09/codex-slot-ping/blob/v0.1.0/docs/architecture.md)
-- [Current status](https://github.com/sslbs09/codex-slot-ping/blob/v0.1.0/docs/current-status.md)
-- [Scheduling Semantics v2](https://github.com/sslbs09/codex-slot-ping/blob/v0.1.0/docs/scheduling-v2.md)
+- [当前状态](docs/current-status.md)
+- [架构说明](docs/architecture.md)
+- [Scheduling Semantics v2](docs/scheduling-v2.md)
+- [v0.2.0 Release Notes](docs/releases/v0.2.0.md)
+- [原始 v0.1 设计快照](docs/superpowers/specs/2026-10-11-codex-slot-ping-v0.1-design.md)：历史资料，不代表当前调度行为。

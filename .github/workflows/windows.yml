@@ -6,7 +6,7 @@ on:
     branches:
       - main
     tags:
-      - v0.1.0
+      - 'v0.*'
   workflow_dispatch:
 
 permissions:
@@ -32,6 +32,7 @@ jobs:
           dotnet publish src/CodexSlotPing.App/CodexSlotPing.App.csproj
           -c Release -r win-x64 --self-contained true
           -p:PublishSingleFile=false
+          -p:DebugType=None -p:DebugSymbols=false
           -o artifacts/stage
 
       - name: Publish self-contained Runner
@@ -39,12 +40,24 @@ jobs:
           dotnet publish src/CodexSlotPing.Runner/CodexSlotPing.Runner.csproj
           -c Release -r win-x64 --self-contained true
           -p:PublishSingleFile=false
+          -p:DebugType=None -p:DebugSymbols=false
           -o artifacts/stage/Runner
 
       - name: Verify portable layout and create ZIP/checksum
+        id: package
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $propsPath = Join-Path $env:GITHUB_WORKSPACE 'Directory.Build.props'
+          [xml]$props = Get-Content -LiteralPath $propsPath -Raw
+          $version = [string]$props.Project.PropertyGroup.Version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Invalid product version in Directory.Build.props: $version"
+          }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Release tag $($env:GITHUB_REF_NAME) does not match product version v$version."
+          }
+
           $stage = Join-Path $env:GITHUB_WORKSPACE 'artifacts/stage'
           $required = @(
             'CodexSlotPing.App.exe',
@@ -78,6 +91,23 @@ jobs:
             throw "Unexpected executables in portable package: $($unexpectedExecutables -join ', ')"
           }
 
+          $pdbFiles = @(Get-ChildItem -LiteralPath $stage -Recurse -File -Filter '*.pdb')
+          if ($pdbFiles.Count -gt 0) {
+            throw "Portable package must not contain PDB files: $($pdbFiles.FullName -join ', ')"
+          }
+
+          $expectedFileVersion = "$version.0"
+          $expectedProductVersion = "$version+$($env:GITHUB_SHA.ToLowerInvariant())"
+          foreach ($relative in @('CodexSlotPing.App.exe', 'Runner/CodexSlotPing.Runner.exe')) {
+            $versionInfo = (Get-Item -LiteralPath (Join-Path $stage $relative)).VersionInfo
+            if ($versionInfo.FileVersion -ne $expectedFileVersion) {
+              throw "$relative FileVersion was '$($versionInfo.FileVersion)', expected '$expectedFileVersion'."
+            }
+            if ($versionInfo.ProductVersion -ne $expectedProductVersion) {
+              throw "$relative ProductVersion was '$($versionInfo.ProductVersion)', expected '$expectedProductVersion'."
+            }
+          }
+
           $scriptFiles = @(Get-ChildItem -LiteralPath $stage -Recurse -File | Where-Object {
             $_.Extension -in @('.ps1', '.psm1', '.cmd', '.bat')
           })
@@ -86,11 +116,11 @@ jobs:
           }
 
           $artifactDirectory = Join-Path $env:GITHUB_WORKSPACE 'artifacts'
-          $zipName = 'CodexSlotPing-v0.1.0-win-x64.zip'
+          $artifactName = "CodexSlotPing-v$version-win-x64"
+          $zipName = "$artifactName.zip"
+          $checksumName = "$zipName.sha256"
           $zipPath = Join-Path $artifactDirectory $zipName
-          $checksumPath = "$zipPath.sha256"
-          if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-          if (Test-Path -LiteralPath $checksumPath) { Remove-Item -LiteralPath $checksumPath -Force }
+          $checksumPath = Join-Path $artifactDirectory $checksumName
           Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -CompressionLevel Optimal
 
           Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -114,11 +144,15 @@ jobs:
             throw 'The SHA-256 file does not match the ZIP.'
           }
 
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "artifact-name=$artifactName"
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "zip-path=artifacts/$zipName"
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "checksum-path=artifacts/$checksumName"
+
       - name: Upload ZIP and checksum
         uses: actions/upload-artifact@v7
         with:
-          name: CodexSlotPing-v0.1.0-win-x64
+          name: ${{ steps.package.outputs.artifact-name }}
           path: |
-            artifacts/CodexSlotPing-v0.1.0-win-x64.zip
-            artifacts/CodexSlotPing-v0.1.0-win-x64.zip.sha256
+            ${{ steps.package.outputs.zip-path }}
+            ${{ steps.package.outputs.checksum-path }}
           if-no-files-found: error

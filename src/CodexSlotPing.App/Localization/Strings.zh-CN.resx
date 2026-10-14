@@ -12,23 +12,25 @@
   <data name="Main.LoginNotConfirmed" xml:space="preserve"><value>尚未确认 ChatGPT 登录状态</value></data>
   <data name="Main.LoginUnknown" xml:space="preserve"><value>无法确认登录状态</value></data>
   <data name="Main.CliVersionUnavailable" xml:space="preserve"><value>无法读取 Codex CLI 版本</value></data>
-  <data name="Main.NextSlot" xml:space="preserve"><value>下个时段</value></data>
-  <data name="Main.WaitingForSchedule" xml:space="preserve"><value>等待计划时段</value></data>
-  <data name="Main.UpdateTimezoneForNext" xml:space="preserve"><value>更新时区锁后才能计算下个时段。</value></data>
-  <data name="Main.NoEligibleFutureSlot" xml:space="preserve"><value>没有可用的未来时段。</value></data>
-  <data name="Main.AdmissionWindowClosesIn" xml:space="preserve"><value>执行窗口将在 {0} 后关闭</value></data>
+  <data name="Main.NextSlot" xml:space="preserve"><value>下次计划尝试</value></data>
+  <data name="Main.WaitingForSchedule" xml:space="preserve"><value>等待计划任务</value></data>
+  <data name="Main.UpdateTimezoneForNext" xml:space="preserve"><value>更新时区锁后才能计算下次计划尝试。</value></data>
+  <data name="Main.NoPlannedAttempt" xml:space="preserve"><value>当前没有计划尝试时间。</value></data>
+  <data name="Main.ScheduleRecalculateAfterResume" xml:space="preserve"><value>恢复后重新计算计划。</value></data>
+  <data name="Main.AttemptPlannedNow" xml:space="preserve"><value>依据本地调度策略。</value></data>
   <data name="Main.StartsIn" xml:space="preserve"><value>将在 {0} 后开始</value></data>
-  <data name="Main.Today" xml:space="preserve"><value>今天</value></data>
+  <data name="Main.Today" xml:space="preserve"><value>旧固定时段</value></data>
   <data name="Main.Model" xml:space="preserve"><value>模型</value></data>
   <data name="Main.Reasoning" xml:space="preserve"><value>推理强度</value></data>
   <data name="Main.Scheduler" xml:space="preserve"><value>计划任务</value></data>
+  <data name="Main.AutomationControl" xml:space="preserve"><value>自动化控制</value></data>
   <data name="Main.WakeComputer" xml:space="preserve"><value>唤醒电脑</value></data>
   <data name="Main.CopyInstructions" xml:space="preserve"><value>复制安装说明</value></data>
   <data name="Main.TimezoneAction" xml:space="preserve"><value>使用当前时区并更新计划任务</value></data>
   <data name="Main.TestNow" xml:space="preserve"><value>立即测试</value></data>
   <data name="Main.Settings" xml:space="preserve"><value>设置</value></data>
   <data name="Main.OpenLogs" xml:space="preserve"><value>打开日志</value></data>
-  <data name="Main.StrictSlot" xml:space="preserve"><value>严格时段 · 错过的时段不会补发。</value></data>
+  <data name="Main.StrictSlot" xml:space="preserve"><value>计划任务只负责唤醒 Runner；Core 会再次检查 eligibility。</value></data>
   <data name="Main.OpenSettingHint" xml:space="preserve"><value>打开对应设置</value></data>
   <data name="Main.OfficialCliInstructions" xml:space="preserve"><value>安装官方 Codex CLI：npm install -g @openai/codex&#xD;&#xA;然后使用 ChatGPT 账户登录：codex login</value></data>
   <data name="Main.StatusRefreshFailed" xml:space="preserve"><value>刷新状态失败：{0}</value></data>
@@ -36,6 +38,10 @@
   <data name="Main.TestNowAlreadyRunning" xml:space="preserve"><value>已有一个立即测试请求正在运行。</value></data>
   <data name="Main.TestNowConfirmTitle" xml:space="preserve"><value>确认立即测试</value></data>
   <data name="Main.TestNowConfirmBody" xml:space="preserve"><value>这会将当前配置的提示词作为真实请求发送给 Codex，并可能计入使用额度。是否继续？</value></data>
+  <data name="Main.TestNowConfirmWithDecision" xml:space="preserve"><value>{0}{1}本地尝试状态：{2}{1}原因：{3}{1}可信度：{4}{1}下次计划尝试：{5}{6}{1}{1}确认执行一次立即测试？</value></data>
+  <data name="Main.EligibilityTitle" xml:space="preserve"><value>本地尝试计划</value></data>
+  <data name="Main.EligibilityDetails" xml:space="preserve"><value>状态：{0}{1}原因：{2}{1}可信度：{3}{1}下次计划尝试：{4}{5}</value></data>
+  <data name="Main.EligibilityExplanation" xml:space="preserve"><value>说明：{0}</value></data>
   <data name="Main.TestNowResultTitle" xml:space="preserve"><value>立即测试结果</value></data>
   <data name="Main.TestNowFailedTitle" xml:space="preserve"><value>立即测试失败</value></data>
   <data name="Main.LogsOpenFailed" xml:space="preserve"><value>无法打开日志：{0}</value></data>
@@ -48,6 +54,7 @@
   <data name="Scheduler.TimezoneChanged" xml:space="preserve"><value>Windows 时区已变化，需要更新计划任务。已配置：{0}；当前：{1}。</value></data>
   <data name="Scheduler.Conflict" xml:space="preserve"><value>发现同名任务，但它不属于本应用；已保留原样。</value></data>
   <data name="Scheduler.ReadFailed" xml:space="preserve"><value>无法确认 Windows 计划任务的状态。</value></data>
+  <data name="Scheduler.PauseDisableFailed" xml:space="preserve"><value>自动调度已暂停，但计划任务仍处于启用状态。</value></data>
   <data name="Diagnostic.CodexNotFound" xml:space="preserve"><value>未找到 Codex CLI，或其本机可执行文件缺失。</value></data>
   <data name="Diagnostic.CliVersionUnknown" xml:space="preserve"><value>无法确认 Codex CLI 版本。</value></data>
   <data name="Diagnostic.LoginUnknown" xml:space="preserve"><value>无法确认 ChatGPT 登录状态。</value></data>
@@ -103,6 +110,7 @@
   <data name="State.NeedsRepair" xml:space="preserve"><value>需要修复</value></data>
   <data name="State.TimezoneChanged" xml:space="preserve"><value>时区已变化</value></data>
   <data name="State.Conflict" xml:space="preserve"><value>存在冲突</value></data>
+  <data name="State.Error" xml:space="preserve"><value>异常</value></data>
   <data name="State.Unknown" xml:space="preserve"><value>未知</value></data>
   <data name="Slot.Confirmed" xml:space="preserve"><value>✓ 已确认</value></data>
   <data name="Slot.AttemptedUnconfirmed" xml:space="preserve"><value>△ 已尝试 · 未确认</value></data>
@@ -114,23 +122,48 @@
   <data name="TestResult.Reason" xml:space="preserve"><value>原因：{0}</value></data>
   <data name="Tray.Open" xml:space="preserve"><value>打开</value></data>
   <data name="Tray.TestNow" xml:space="preserve"><value>立即测试</value></data>
+  <data name="Tray.StatusLabel" xml:space="preserve"><value>自动化状态</value></data>
+  <data name="Tray.Settings" xml:space="preserve"><value>设置</value></data>
+  <data name="Tray.Tooltip" xml:space="preserve"><value>Codex Slot Ping · {0}</value></data>
+  <data name="Tray.Status.SchedulerError" xml:space="preserve"><value>调度器异常</value></data>
+  <data name="Tray.Status.Paused" xml:space="preserve"><value>自动调度已暂停 · 恢复后重新计算计划</value></data>
+  <data name="Tray.Status.PauseNotPersisted" xml:space="preserve"><value>暂停未持久化 · 自动运行临时保护 · 恢复后重算计划</value></data>
+  <data name="Tray.Status.Disabled" xml:space="preserve"><value>自动调度未启用</value></data>
+  <data name="Tray.Status.Blocked" xml:space="preserve"><value>自动调度被阻止 · {0}</value></data>
+  <data name="Tray.Status.Unknown" xml:space="preserve"><value>当前无法确认条件</value></data>
+  <data name="Tray.Status.Waiting" xml:space="preserve"><value>等待下一次计划检查 · {0}</value></data>
+  <data name="Tray.Status.Ready" xml:space="preserve"><value>当前条件满足 · 等待计划唤醒</value></data>
   <data name="Tray.SchedulerLabel" xml:space="preserve"><value>计划任务</value></data>
+  <data name="Tray.AutomationControl" xml:space="preserve"><value>自动化：{0}</value></data>
+  <data name="Tray.AutomationControlLabel" xml:space="preserve"><value>自动化控制状态</value></data>
   <data name="Tray.SchedulerState" xml:space="preserve"><value>计划任务：{0}</value></data>
   <data name="Tray.WakeComputer" xml:space="preserve"><value>唤醒电脑</value></data>
   <data name="Tray.OpenLogs" xml:space="preserve"><value>打开日志</value></data>
   <data name="Tray.Exit" xml:space="preserve"><value>退出</value></data>
+  <data name="Automation.State.Enabled" xml:space="preserve"><value>已启用</value></data>
+  <data name="Automation.State.Paused" xml:space="preserve"><value>已暂停</value></data>
+  <data name="Automation.State.Disabled" xml:space="preserve"><value>未启用</value></data>
+  <data name="Automation.State.DisabledAndPaused" xml:space="preserve"><value>未启用 · 保留暂停状态</value></data>
+  <data name="Automation.State.PauseNotPersisted" xml:space="preserve"><value>暂停未持久化 · 当前进程临时保护</value></data>
+  <data name="Automation.Pause" xml:space="preserve"><value>暂停自动调度</value></data>
+  <data name="Automation.Resume" xml:space="preserve"><value>恢复自动调度</value></data>
+  <data name="Automation.PausedMessage" xml:space="preserve"><value>自动调度已暂停；仍可在确认后使用立即测试。</value></data>
+  <data name="Automation.ResumedMessage" xml:space="preserve"><value>自动调度已恢复，并生成了新计划。</value></data>
+  <data name="Automation.ControlSaveFailed" xml:space="preserve"><value>无法保存自动化控制状态。</value></data>
+  <data name="Automation.PauseNotPersistedProtected" xml:space="preserve"><value>暂停未能保存；当前进程会临时阻止新的自动 claim，关闭应用后该保护不会保留。</value></data>
+  <data name="Automation.SchedulerSyncFailed" xml:space="preserve"><value>自动化控制状态已保存，但计划任务未能同步。</value></data>
   <data name="Settings.WindowTitle" xml:space="preserve"><value>Codex Slot Ping 设置</value></data>
   <data name="Settings.Header" xml:space="preserve"><value>设置</value></data>
   <data name="Settings.SectionTitle" xml:space="preserve"><value>调度与请求</value></data>
-  <data name="Settings.FourLocalTimes" xml:space="preserve"><value>四个本地时段（24 小时制 HH:mm）</value></data>
+  <data name="Settings.FourLocalTimes" xml:space="preserve"><value>旧固定时段（仅供诊断，24 小时制 HH:mm；不参与调度）</value></data>
   <data name="Settings.ModelRequest" xml:space="preserve"><value>模型选择请求</value></data>
   <data name="Settings.ReasoningSupport" xml:space="preserve"><value>当前 CLI 支持的推理强度</value></data>
-  <data name="Settings.PromptLabel" xml:space="preserve"><value>每个正式时段和“立即测试”发送的提示词</value></data>
+  <data name="Settings.PromptLabel" xml:space="preserve"><value>计划尝试和“立即测试”发送的提示词</value></data>
   <data name="Settings.TimezoneBehavior" xml:space="preserve"><value>时区行为</value></data>
   <data name="Settings.SystemTimezoneDescription" xml:space="preserve"><value>“跟随系统”会使用 Windows 时区。锁定的时区必须与当前 Windows 时区一致。</value></data>
   <data name="Settings.TimezoneSystem" xml:space="preserve"><value>跟随系统</value></data>
   <data name="Settings.ConfirmTimezone" xml:space="preserve"><value>确认当前时区并更新计划任务</value></data>
-  <data name="Settings.WakeComputer" xml:space="preserve"><value>在计划时段唤醒电脑</value></data>
+  <data name="Settings.WakeComputer" xml:space="preserve"><value>为计划尝试唤醒电脑</value></data>
   <data name="Settings.RawLogs" xml:space="preserve"><value>在本地保存 Codex 原始输出（保留 14 天）</value></data>
   <data name="Settings.RawLogsExplanation" xml:space="preserve"><value>原始输出可能包含 Codex 回复。文件保存在本地日志目录，并会在 14 天后删除。</value></data>
   <data name="Settings.Save" xml:space="preserve"><value>保存设置</value></data>
@@ -138,11 +171,12 @@
   <data name="Settings.DisableScheduler" xml:space="preserve"><value>禁用计划任务</value></data>
   <data name="Settings.RemoveScheduler" xml:space="preserve"><value>删除计划任务</value></data>
   <data name="Settings.Close" xml:space="preserve"><value>关闭</value></data>
-  <data name="Settings.SchedulerWarning" xml:space="preserve"><value>安装后会创建四个本地时间触发器。每个符合条件的触发器都可能向 Codex 发送已配置的提示词，并计入使用额度。</value></data>
+  <data name="Settings.SchedulerWarning" xml:space="preserve"><value>Windows Scheduler 只在一个计划时间唤醒 Runner。发送 Codex 请求前，Runner 会重新检查 Core eligibility。</value></data>
   <data name="Settings.Saved" xml:space="preserve"><value>设置已保存。</value></data>
   <data name="Settings.InstallConfirmTitle" xml:space="preserve"><value>确认安装计划任务</value></data>
-  <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>这会创建或更新本应用拥有的 Windows 计划任务。每个符合条件的时段都会向 Codex 发送已配置的提示词，并可能计入使用额度。是否继续？</value></data>
+  <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>这会创建或更新本应用拥有的 Windows 计划任务。本地策略允许尝试时，任务会唤醒 Runner；Runner 会再次检查 eligibility，然后才向 Codex 发送已配置的提示词。是否继续？</value></data>
   <data name="Settings.InstallSuccess" xml:space="preserve"><value>计划任务已安装，回读状态为已启用。</value></data>
+  <data name="Settings.InstallPausedSuccess" xml:space="preserve"><value>计划任务计划已更新；自动调度仍处于暂停状态，任务保持关闭。</value></data>
   <data name="Settings.DisableConfirmTitle" xml:space="preserve"><value>禁用计划任务</value></data>
   <data name="Settings.DisableConfirmBody" xml:space="preserve"><value>要禁用本应用拥有的 Codex Slot Ping 计划任务吗？</value></data>
   <data name="Settings.DisableSuccess" xml:space="preserve"><value>计划任务已关闭。</value></data>
@@ -161,8 +195,36 @@
   <data name="Exit.PreferenceSaveFailed" xml:space="preserve"><value>应用仍会退出，但无法保存此偏好设置：{0}</value></data>
   <data name="Exit.WarningTitle" xml:space="preserve"><value>Codex Slot Ping 正在运行计划任务</value></data>
   <data name="Exit.SuppressWarning" xml:space="preserve"><value>不再显示此提醒</value></data>
-  <data name="Exit.Warning" xml:space="preserve"><value>关闭 Codex Slot Ping 不会停用计划时段。</value></data>
+  <data name="Exit.Warning" xml:space="preserve"><value>关闭 Codex Slot Ping 不会停用计划尝试。</value></data>
   <data name="Exit.Explanation" xml:space="preserve"><value>计划任务独立于此窗口运行。退出只会关闭应用。</value></data>
   <data name="Exit.ExitApp" xml:space="preserve"><value>退出应用</value></data>
   <data name="Exit.Cancel" xml:space="preserve"><value>取消</value></data>
+  <data name="Eligibility.None" xml:space="preserve"><value>—</value></data>
+  <data name="Eligibility.UserFacingStatus.Eligible" xml:space="preserve"><value>当前条件满足，等待计划唤醒</value></data>
+  <data name="Eligibility.UserFacingStatus.NotYetEligible" xml:space="preserve"><value>等待下一次计划检查</value></data>
+  <data name="Eligibility.UserFacingStatus.Blocked" xml:space="preserve"><value>自动调度被阻止：{0}</value></data>
+  <data name="Eligibility.UserFacingStatus.Unknown" xml:space="preserve"><value>当前无法确认条件</value></data>
+  <data name="Eligibility.UserFacingStatus.ConfirmationRequired" xml:space="preserve"><value>开始 Test Now 前需要确认</value></data>
+  <data name="Main.EligibilityExplainabilityDetails" xml:space="preserve"><value>{0}{1}原因：{2}{1}可信度：{3}{1}下次计划尝试：{4}{5}</value></data>
+  <data name="Eligibility.Status.Eligible" xml:space="preserve"><value>本地策略允许尝试</value></data>
+  <data name="Eligibility.Status.NotYetEligible" xml:space="preserve"><value>等待下次计划尝试时间</value></data>
+  <data name="Eligibility.Status.Blocked" xml:space="preserve"><value>已阻止</value></data>
+  <data name="Eligibility.Status.Unknown" xml:space="preserve"><value>未知</value></data>
+  <data name="Eligibility.Status.ConfirmationRequired" xml:space="preserve"><value>需要确认</value></data>
+  <data name="Eligibility.Confidence.Unknown" xml:space="preserve"><value>未知</value></data>
+  <data name="Eligibility.Confidence.Low" xml:space="preserve"><value>低</value></data>
+  <data name="Eligibility.Confidence.Medium" xml:space="preserve"><value>中</value></data>
+  <data name="Eligibility.Confidence.High" xml:space="preserve"><value>高</value></data>
+  <data name="Eligibility.Reason.Ready" xml:space="preserve"><value>本地策略允许进行尝试</value></data>
+  <data name="Eligibility.Reason.ExternalManualUsageUnknown" xml:space="preserve"><value>依据本地调度策略计算。无法观察此应用之外的 Codex 使用情况。</value></data>
+  <data name="Eligibility.Reason.UsageLimitWithoutTrustedReset" xml:space="preserve"><value>已观察到使用额度限制，但没有可信的重置时间</value></data>
+  <data name="Eligibility.Reason.WaitingForTrustedReset" xml:space="preserve"><value>等待已观察到的可信重置时间</value></data>
+  <data name="Eligibility.Reason.TestNowConfirmationRequired" xml:space="preserve"><value>需要确认一次真实的立即测试请求</value></data>
+  <data name="Eligibility.Reason.TestNowExplicitlyConfirmed" xml:space="preserve"><value>已明确确认手动立即测试</value></data>
+  <data name="Eligibility.Reason.ClockRollback" xml:space="preserve"><value>系统时间早于已记录的 UTC 高水位</value></data>
+  <data name="Eligibility.Reason.UnresolvedClaim" xml:space="preserve"><value>另一个请求 claim 尚未完成</value></data>
+  <data name="Eligibility.Reason.UnsupportedStateSchema" xml:space="preserve"><value>状态文件版本不受支持</value></data>
+  <data name="Eligibility.Reason.InvalidRequest" xml:space="preserve"><value>Eligibility 请求无效</value></data>
+  <data name="Eligibility.Reason.InvalidState" xml:space="preserve"><value>Eligibility 状态无效</value></data>
+  <data name="Eligibility.Reason.LocalAttemptSpacing" xml:space="preserve"><value>等待本地调度间隔后进行下一次计划尝试</value></data>
 </root>

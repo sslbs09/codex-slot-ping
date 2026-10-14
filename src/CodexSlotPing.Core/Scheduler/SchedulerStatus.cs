@@ -5,7 +5,11 @@ public sealed record SchedulerTriggerReadback(
     bool IsDaily,
     bool Enabled,
     int DaysInterval,
-    string StartBoundary);
+    string StartBoundary,
+    string? EndBoundary = null)
+{
+    public bool IsOneShot => TriggerType == 1;
+}
 
 public sealed record SchedulerTaskReadback(
     IReadOnlyList<SchedulerTriggerReadback> Triggers,

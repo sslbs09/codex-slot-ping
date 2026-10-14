@@ -1,12 +1,30 @@
 namespace CodexSlotPing.Runner;
 
-public sealed record RunnerOptions(string TaskPath);
+public enum RunnerMode
+{
+    FormalSlot,
+    TestNow
+}
+
+public sealed record RunnerOptions(
+    string TaskPath,
+    RunnerMode Mode = RunnerMode.FormalSlot,
+    string? TestId = null,
+    bool TestNowConfirmed = false);
 
 public static class RunnerArguments
 {
     public static RunnerOptions Parse(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
+        if (args.Length == 3 &&
+            string.Equals(args[0], "--test-now", StringComparison.Ordinal) &&
+            string.Equals(args[2], "--confirmed", StringComparison.Ordinal) &&
+            Guid.TryParseExact(args[1], "N", out _))
+        {
+            return new RunnerOptions(string.Empty, RunnerMode.TestNow, args[1], TestNowConfirmed: true);
+        }
+
         if (args.Length != 2 || !string.Equals(args[0], "--task-path", StringComparison.Ordinal))
         {
             throw new ArgumentException("Runner requires exactly one --task-path value.", nameof(args));

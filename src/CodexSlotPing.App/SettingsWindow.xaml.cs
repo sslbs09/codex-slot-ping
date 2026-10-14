@@ -1,7 +1,5 @@
 using System.Windows;
-using CodexSlotPing.Core.Codex;
-using CodexSlotPing.Core.Configuration;
-using CodexSlotPing.Core.Scheduler;
+using CodexSlotPing.App.ReadModels;
 using WpfMessageBox = System.Windows.MessageBox;
 
 namespace CodexSlotPing.App;
@@ -11,22 +9,27 @@ public partial class SettingsWindow : Window
     private AppScreenState _screenState;
     private bool _initializing = true;
     private readonly AppController _controller;
+    private readonly Action<AppScreenState>? _stateChanged;
 
-    public SettingsWindow(AppController controller, AppScreenState screenState)
+    public SettingsWindow(
+        AppController controller,
+        AppScreenState screenState,
+        Action<AppScreenState>? stateChanged = null)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _screenState = screenState ?? throw new ArgumentNullException(nameof(screenState));
+        _stateChanged = stateChanged;
         InitializeComponent();
         InitializeFields();
     }
 
     private void InitializeFields()
     {
-        var config = _screenState.Config;
-        Slot1Text.Text = config.Slots.ElementAtOrDefault(0) ?? "07:00";
-        Slot2Text.Text = config.Slots.ElementAtOrDefault(1) ?? "12:01";
-        Slot3Text.Text = config.Slots.ElementAtOrDefault(2) ?? "17:01";
-        Slot4Text.Text = config.Slots.ElementAtOrDefault(3) ?? "22:01";
+        var config = _screenState.Automation;
+        Slot1Text.Text = config.LegacyFixedSlots.ElementAtOrDefault(0) ?? "07:00";
+        Slot2Text.Text = config.LegacyFixedSlots.ElementAtOrDefault(1) ?? "12:01";
+        Slot3Text.Text = config.LegacyFixedSlots.ElementAtOrDefault(2) ?? "17:01";
+        Slot4Text.Text = config.LegacyFixedSlots.ElementAtOrDefault(3) ?? "22:01";
         ModelText.Text = config.Model;
         PromptText.Text = config.Prompt;
         WakeCheck.IsChecked = config.WakeToRun;
@@ -34,9 +37,8 @@ public partial class SettingsWindow : Window
 
         ReasoningCombo.DisplayMemberPath = nameof(LocalizedOption.Display);
         ReasoningCombo.SelectedValuePath = nameof(LocalizedOption.Value);
-        var reasoningValues = _screenState.Codex.SupportedReasoningEfforts.Count > 0
-            ? _screenState.Codex.SupportedReasoningEfforts.OrderBy(value => value, StringComparer.Ordinal).ToArray()
-            : CodexCliCapabilities.DocumentedReasoningEfforts.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var reasoningValues = _screenState.Codex.SupportedReasoningEfforts
+            .OrderBy(value => value, StringComparer.Ordinal).ToArray();
         foreach (var reasoning in reasoningValues.Append(config.ReasoningEffort).Distinct(StringComparer.Ordinal))
         {
             ReasoningCombo.Items.Add(new LocalizedOption(reasoning, UiText.FormatReasoningEffort(reasoning)));
@@ -56,10 +58,13 @@ public partial class SettingsWindow : Window
             AddTimeZoneOption(config.TimeZone);
         }
         TimeZoneCombo.SelectedValue = config.TimeZone;
+        EligibilityDetailsText.Text = _screenState.Eligibility.Details;
 
-        TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
+        TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerViewState.TimezoneChanged
             ? Visibility.Visible
             : Visibility.Collapsed;
+        RenderAutomationControl();
+        RenderSchedulerState();
         _initializing = false;
     }
 
@@ -67,9 +72,9 @@ public partial class SettingsWindow : Window
     {
         try
         {
-            var candidate = _screenState.Config with
+            var candidate = _screenState.Automation with
             {
-                Slots = [Slot1Text.Text.Trim(), Slot2Text.Text.Trim(), Slot3Text.Text.Trim(), Slot4Text.Text.Trim()],
+                LegacyFixedSlots = [Slot1Text.Text.Trim(), Slot2Text.Text.Trim(), Slot3Text.Text.Trim(), Slot4Text.Text.Trim()],
                 Model = ModelText.Text.Trim(),
                 ReasoningEffort = ReasoningCombo.SelectedValue?.ToString() ?? string.Empty,
                 Prompt = PromptText.Text,
@@ -107,7 +112,11 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        await RunSchedulerOperationAsync(_controller.InstallOrUpdateSchedulerAsync, "Settings.InstallSuccess");
+        await RunSchedulerOperationAsync(
+            _controller.InstallOrUpdateSchedulerAsync,
+            _screenState.Automation.IsPauseProtectionActive
+                ? "Settings.InstallPausedSuccess"
+                : "Settings.InstallSuccess");
     }
 
     private async void Disable_Click(object sender, RoutedEventArgs e)
@@ -130,8 +139,27 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private async void AutomationPause_Click(object sender, RoutedEventArgs e)
+    {
+        var wasPaused = _screenState.Automation.IsPauseProtectionActive;
+        try
+        {
+            var result = wasPaused
+                ? await _controller.ResumeAutomationAsync(CancellationToken.None)
+                : await _controller.PauseAutomationAsync(CancellationToken.None);
+            SetScreenState(await _controller.RefreshAsync(CancellationToken.None));
+            StatusText.Text = result.Succeeded
+                ? UiText.Get(wasPaused ? "Automation.ResumedMessage" : "Automation.PausedMessage")
+                : UiText.FormatDiagnostic(result.DiagnosticCategory ?? "automation-control-save-failed");
+        }
+        catch (Exception exception)
+        {
+            StatusText.Text = UiText.Format("Settings.Exception", exception.Message);
+        }
+    }
+
     private async Task RunSchedulerOperationAsync(
-        Func<CancellationToken, Task<SchedulerOperationResult>> operation,
+        Func<CancellationToken, Task<SchedulerOperationView>> operation,
         string successMessageKey)
     {
         try
@@ -141,7 +169,9 @@ public partial class SettingsWindow : Window
                 ? UiText.Get(successMessageKey)
                 : UiText.FormatDiagnostic(result.DiagnosticCategory ?? UiText.Get("Settings.OperationFailed"));
             _screenState = await _controller.RefreshAsync(CancellationToken.None);
-            TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
+            SetScreenState(_screenState);
+            EligibilityDetailsText.Text = _screenState.Eligibility.Details;
+            TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerViewState.TimezoneChanged
                 ? Visibility.Visible
                 : Visibility.Collapsed;
         }
@@ -174,6 +204,7 @@ public partial class SettingsWindow : Window
             }
 
             _screenState = await _controller.RefreshAsync(CancellationToken.None);
+            SetScreenState(_screenState);
             TimeZoneCombo.Items.Clear();
             AddTimeZoneOption("SYSTEM");
             if (!TimeZoneCombo.Items.Cast<LocalizedOption>().Any(option =>
@@ -181,7 +212,7 @@ public partial class SettingsWindow : Window
             {
                 AddTimeZoneOption(_screenState.CurrentWindowsTimeZoneId);
             }
-            TimeZoneCombo.SelectedValue = _screenState.Config.TimeZone;
+            TimeZoneCombo.SelectedValue = _screenState.Automation.TimeZone;
             TimezoneUpdateButton.Visibility = Visibility.Collapsed;
             StatusText.Text = UiText.Get("Settings.TimezoneUpdated");
         }
@@ -222,6 +253,35 @@ public partial class SettingsWindow : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void RenderAutomationControl()
+    {
+        AutomationStatusText.Text = UiText.FormatAutomationControlState(
+            _screenState.Automation.Enabled,
+            _screenState.Automation.IsPaused,
+            _screenState.Automation.IsPauseProtectionActive);
+        AutomationPauseButton.Content = UiText.Get(_screenState.Automation.IsPauseProtectionActive
+            ? "Automation.Resume"
+            : "Automation.Pause");
+        AutomationPauseButton.IsEnabled =
+            _screenState.Automation.Enabled || _screenState.Automation.IsPauseProtectionActive;
+    }
+
+    private void RenderSchedulerState()
+    {
+        SchedulerStatusText.Text = _screenState.Scheduler.DiagnosticCategory == "scheduler-enabled-while-paused"
+            ? UiText.Get("Scheduler.PauseDisableFailed")
+            : UiText.FormatSchedulerState(_screenState.Scheduler.State);
+    }
+
+    private void SetScreenState(AppScreenState state)
+    {
+        _screenState = state;
+        EligibilityDetailsText.Text = state.Eligibility.Details;
+        RenderAutomationControl();
+        RenderSchedulerState();
+        _stateChanged?.Invoke(state);
+    }
 
     private sealed record LocalizedOption(string Value, string Display);
 }

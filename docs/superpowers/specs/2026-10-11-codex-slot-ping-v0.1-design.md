@@ -1,6 +1,8 @@
 # Codex Slot Ping v0.1 — Design Specification
 
-**Status:** Design freeze candidate for owner review  
+> **Historical design snapshot.** This document records the original fixed-slot proposal before Scheduling Semantics v2 and M3-C were implemented. Its fixed-slot trigger and admission details are retained for history and migration context; where they differ, the current release-candidate behavior is documented in [README](../../../README.md), [Architecture](../../architecture.md), and [Current Status](../../current-status.md). It is not the current scheduler contract.
+
+**Historical status:** Original design freeze candidate for owner review; superseded by the v0.1 dynamic-scheduling implementation.
 **Date:** 2026-10-11  
 **Target:** Windows x64, portable ZIP  
 **Repository:** codex-slot-ping

@@ -24,6 +24,18 @@ public sealed class JsonConfigStore : IConfigStore
             return config;
         }
 
+        if (config.SchemaVersion == 1)
+        {
+            config = config with
+            {
+                SchemaVersion = AppConfigDefaults.Create().SchemaVersion,
+                LegacyFixedSlots = config.Slots ?? config.LegacyFixedSlots,
+                Slots = null
+            };
+            await SaveAsync(config, cancellationToken).ConfigureAwait(false);
+            return config;
+        }
+
         EnsureSupported(config);
         return config;
     }
@@ -37,7 +49,7 @@ public sealed class JsonConfigStore : IConfigStore
 
     private static void EnsureSupported(AppConfig config)
     {
-        if (config.SchemaVersion != 1)
+        if (config.SchemaVersion != 2)
         {
             throw new InvalidDataException($"Unsupported config schema version: {config.SchemaVersion}.");
         }

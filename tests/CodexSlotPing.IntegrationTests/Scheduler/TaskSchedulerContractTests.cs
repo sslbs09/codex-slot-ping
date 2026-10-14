@@ -50,7 +50,7 @@ public sealed class TaskSchedulerContractTests
         var taskPath = CreateUniqueTaskPath();
         var runnerPath = FindRunnerPath();
         Assert.True(File.Exists(runnerPath), $"Runner executable was not built at {runnerPath}.");
-        var definition = CreateDefinition(taskPath, runnerPath, wakeToRun: true, [new(7, 0), new(12, 1), new(17, 1), new(22, 1)]);
+        var definition = CreateDefinition(taskPath, runnerPath, wakeToRun: true, DateTimeOffset.UtcNow.AddHours(2));
         var gateway = new WindowsTaskSchedulerGateway();
 
         try
@@ -66,17 +66,16 @@ public sealed class TaskSchedulerContractTests
             Assert.Equal(ExpectedOwnerMarker, status.Description);
 
             var readback = Assert.IsType<SchedulerTaskReadback>(status.Readback);
-            Assert.Equal(4, readback.Triggers.Count);
-            Assert.All(readback.Triggers, trigger =>
-            {
-                Assert.True(trigger.IsDaily);
-                Assert.True(trigger.Enabled);
-                Assert.Equal(1, trigger.DaysInterval);
-                Assert.Matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$", trigger.StartBoundary);
-            });
-            Assert.Equal(new[] { "07:00", "12:01", "17:01", "22:01" },
-                readback.Triggers.Select(trigger => trigger.StartBoundary.Substring(11, 5)));
-            Assert.False(readback.StartWhenAvailable);
+            var trigger = Assert.Single(readback.Triggers);
+            Assert.True(trigger.IsOneShot);
+            Assert.False(trigger.IsDaily);
+            Assert.True(trigger.Enabled);
+            Assert.Matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}[+-]\\d{2}:\\d{2}$", trigger.StartBoundary);
+            Assert.True(DateTimeOffset.TryParse(trigger.StartBoundary, out var triggerAt));
+            Assert.Equal(definition.SchedulePlan.OneShotTriggerAtUtc, triggerAt.ToUniversalTime());
+            Assert.True(DateTimeOffset.TryParse(trigger.EndBoundary, out var endAt));
+            Assert.True(endAt > triggerAt);
+            Assert.True(readback.StartWhenAvailable);
             Assert.Equal("IgnoreNew", readback.MultipleInstancesPolicy);
             Assert.Equal("PT2M", readback.ExecutionTimeLimit);
             Assert.Equal(0, readback.RestartCount);
@@ -101,13 +100,40 @@ public sealed class TaskSchedulerContractTests
     }
 
     [Fact]
+    public async Task NoPlan_RegistersOwnedTaskWithoutAnyTrigger()
+    {
+        var taskPath = CreateUniqueTaskPath();
+        var runnerPath = FindRunnerPath();
+        Assert.True(File.Exists(runnerPath), $"Runner executable was not built at {runnerPath}.");
+        var definition = CreateDefinition(taskPath, runnerPath, wakeToRun: false, triggerAtUtc: null);
+        var gateway = new WindowsTaskSchedulerGateway();
+
+        try
+        {
+            var installed = await gateway.InstallOrUpdateAsync(definition, CancellationToken.None);
+            Assert.True(installed.Succeeded, Describe(installed));
+
+            var status = await gateway.ReadStatusAsync(taskPath, runnerPath, definition.ConfiguredTimeZoneId,
+                CancellationToken.None);
+
+            Assert.Empty(status.Readback!.Triggers);
+            Assert.True(status.Readback.StartWhenAvailable);
+            Assert.Empty(status.ContractMismatches);
+        }
+        finally
+        {
+            await gateway.RemoveAsync(taskPath, CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task OwnedTaskCanBeUpdatedDisabledAndRemoved()
     {
         var taskPath = CreateUniqueTaskPath();
         var runnerPath = FindRunnerPath();
         var gateway = new WindowsTaskSchedulerGateway();
-        var initial = CreateDefinition(taskPath, runnerPath, wakeToRun: true, [new(1, 0), new(4, 0), new(12, 0), new(20, 0)]);
-        var updated = CreateDefinition(taskPath, runnerPath, wakeToRun: false, [new(2, 0), new(5, 0), new(13, 0), new(21, 0)]);
+        var initial = CreateDefinition(taskPath, runnerPath, wakeToRun: true, DateTimeOffset.UtcNow.AddHours(2));
+        var updated = CreateDefinition(taskPath, runnerPath, wakeToRun: false, DateTimeOffset.UtcNow.AddHours(4));
 
         try
         {
@@ -118,8 +144,8 @@ public sealed class TaskSchedulerContractTests
             var updatedStatus = await gateway.ReadStatusAsync(taskPath, runnerPath, updated.ConfiguredTimeZoneId, CancellationToken.None);
             Assert.True(updatedStatus.IsEnabled);
             Assert.False(updatedStatus.Readback!.WakeToRun);
-            Assert.Equal(new[] { "02:00", "05:00", "13:00", "21:00" },
-                updatedStatus.Readback.Triggers.Select(trigger => trigger.StartBoundary.Substring(11, 5)));
+            Assert.Equal(updated.SchedulePlan.OneShotTriggerAtUtc,
+                DateTimeOffset.Parse(Assert.Single(updatedStatus.Readback.Triggers).StartBoundary).ToUniversalTime());
 
             var disabled = await gateway.DisableAsync(taskPath, CancellationToken.None);
             Assert.True(disabled.Succeeded, disabled.DiagnosticCategory);
@@ -156,7 +182,7 @@ public sealed class TaskSchedulerContractTests
         var oldRunnerPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
         Assert.True(File.Exists(oldRunnerPath), $"The old action fixture was not found at {oldRunnerPath}.");
         var gateway = new WindowsTaskSchedulerGateway();
-        var definition = CreateDefinition(taskPath, oldRunnerPath, wakeToRun: false, [new(7, 0), new(12, 1), new(17, 1), new(22, 1)]);
+        var definition = CreateDefinition(taskPath, oldRunnerPath, wakeToRun: false, DateTimeOffset.UtcNow.AddHours(6));
         var evaluator = new SchedulerHealthEvaluator();
 
         try
@@ -192,7 +218,7 @@ public sealed class TaskSchedulerContractTests
         var runnerPath = FindRunnerPath();
         var originalXml = await CreateUnownedTaskAsync(taskPath, runnerPath);
         var gateway = new WindowsTaskSchedulerGateway();
-        var definition = CreateDefinition(taskPath, runnerPath, wakeToRun: true, [new(1, 0), new(4, 0), new(12, 0), new(20, 0)]);
+        var definition = CreateDefinition(taskPath, runnerPath, wakeToRun: true, DateTimeOffset.UtcNow.AddHours(1));
 
         try
         {
@@ -222,8 +248,7 @@ public sealed class TaskSchedulerContractTests
         var taskPath = CreateUniqueTaskPath();
         var runnerPath = FindRunnerPath();
         var gateway = new WindowsTaskSchedulerGateway();
-        var definition = CreateDefinition(taskPath, runnerPath, wakeToRun: false,
-            [new(7, 0), new(12, 1), new(17, 1), new(22, 1)]);
+        var definition = CreateDefinition(taskPath, runnerPath, wakeToRun: false, DateTimeOffset.UtcNow.AddHours(1));
 
         try
         {
@@ -247,8 +272,9 @@ public sealed class TaskSchedulerContractTests
         string taskPath,
         string runnerPath,
         bool wakeToRun,
-        IReadOnlyList<TimeOnly> slotTimes) =>
-        new(taskPath, runnerPath, TimeZoneInfo.Local.Id, slotTimes, wakeToRun, new DateOnly(2099, 1, 1));
+        DateTimeOffset? triggerAtUtc) =>
+        new(taskPath, runnerPath, TimeZoneInfo.Local.Id,
+            triggerAtUtc is { } at ? SchedulePlan.At(at) : SchedulePlan.None, wakeToRun);
 
     private static string CreateUniqueTaskPath()
     {
@@ -320,7 +346,6 @@ public sealed class TaskSchedulerContractTests
             ReleaseComObject(registration);
             ReleaseComObject(definition);
             ReleaseComObject(root);
-            ReleaseComObject(service);
             return xml;
         }, CancellationToken.None);
 

@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Threading;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Configuration;
 using CodexSlotPing.Core.Persistence;
 using CodexSlotPing.Core.Scheduler;
 using CodexSlotPing.Core.Slots;
+using CodexSlotPing.Core.State;
 using CodexSlotPing.Runner;
 
 namespace CodexSlotPing.IntegrationTests.Runner;
@@ -41,13 +43,18 @@ public sealed class TwoRunnerProcessesTests
             var config = AppConfigDefaults.Create() with
             {
                 TimeZone = "SYSTEM",
-                Slots = slots.Select(time => time.ToString("HH:mm")).ToArray(),
+                LegacyFixedSlots = slots.Select(time => time.ToString("HH:mm")).ToArray(),
                 Prompt = "fixture-only cross-process race"
             };
             var atomicFile = new AtomicJsonFile(new PhysicalAtomicFileOperations());
             await new JsonConfigStore(atomicFile, dataPaths.ConfigPath).SaveAsync(config, CancellationToken.None);
+            var stateStore = new JsonStateStore(atomicFile, statePath);
+            await stateStore.SaveAsync(StateDocument.Empty() with
+            {
+                Eligibility = EligibilityState.Empty() with { ExternalManualUsageUnknown = false }
+            }, CancellationToken.None);
 
-            var installed = await gateway.InstallOrUpdateAsync(taskDefinition with { SlotTimes = slots }, CancellationToken.None);
+            var installed = await gateway.InstallOrUpdateAsync(taskDefinition, CancellationToken.None);
             Assert.True(installed.Succeeded, installed.DiagnosticCategory);
 
             using var startGate = new ManualResetEventSlim(false);
@@ -75,9 +82,13 @@ public sealed class TwoRunnerProcessesTests
 
             Assert.True(File.Exists(statePath), $"Runner did not use isolated LocalAppData state path {statePath}.");
             using var state = JsonDocument.Parse(await File.ReadAllTextAsync(statePath));
+            Assert.Equal(StateDocument.CurrentSchemaVersion, state.RootElement.GetProperty("schemaVersion").GetInt32());
             var formalSlots = state.RootElement.GetProperty("formalSlots").EnumerateArray().ToArray();
             Assert.Single(formalSlots);
             Assert.Equal("CONFIRMED_SUCCESS", formalSlots[0].GetProperty("status").GetString());
+            var eligibility = state.RootElement.GetProperty("eligibility");
+            Assert.False(eligibility.GetProperty("hasUnresolvedClaim").GetBoolean());
+            Assert.NotNull(eligibility.GetProperty("lastAttemptAtUtc").GetString());
         }
         finally
         {
@@ -114,8 +125,7 @@ public sealed class TwoRunnerProcessesTests
 
     private static SchedulerTaskDefinition CreateTaskDefinition(string taskPath, string runnerPath) =>
         new(taskPath, runnerPath, TimeZoneInfo.Local.Id,
-            [new TimeOnly(7, 0), new TimeOnly(12, 1), new TimeOnly(17, 1), new TimeOnly(22, 1)],
-            false, new DateOnly(2099, 1, 1));
+            SchedulePlan.At(DateTimeOffset.UtcNow.AddHours(2)), false);
 
     private static Process StartRunner(string runnerPath, string taskPath, string localAppData, string fakeBin,
         string launchLogPath, string statePath)

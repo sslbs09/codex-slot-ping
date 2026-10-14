@@ -126,13 +126,8 @@ public sealed class TimezoneUpdateServiceTests
 
     private static SchedulerTaskReadback Readback(string actionPath) =>
         new(
-            [
-                new(2, true, true, 1, "2099-01-01T07:00:00"),
-                new(2, true, true, 1, "2099-01-01T12:01:00"),
-                new(2, true, true, 1, "2099-01-01T17:01:00"),
-                new(2, true, true, 1, "2099-01-01T22:01:00")
-            ],
-            false, "IgnoreNew", "PT2M", 0, null, false, "S-1-test", 3, 0,
+            Array.Empty<SchedulerTriggerReadback>(),
+            true, "IgnoreNew", "PT2M", 0, null, false, "S-1-test", 3, 0,
             0, actionPath, "--task-path \"\\Codex Slot Ping\"", Path.GetDirectoryName(actionPath));
 
     private sealed class RecordingSchedulerGateway(SchedulerStatus initialStatus) : ITaskSchedulerGateway

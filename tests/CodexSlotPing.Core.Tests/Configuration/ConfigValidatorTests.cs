@@ -15,13 +15,13 @@ public sealed class ConfigValidatorTests
     };
 
     [Fact]
-    public void Defaults_MatchFrozenV01Values()
+    public void Defaults_PreserveLegacySlotDiagnostics()
     {
         var config = AppConfigDefaults.Create();
 
-        Assert.Equal(1, config.SchemaVersion);
+        Assert.Equal(2, config.SchemaVersion);
         Assert.True(config.Enabled);
-        Assert.Equal(new[] { "07:00", "12:01", "17:01", "22:01" }, config.Slots);
+        Assert.Equal(new[] { "07:00", "12:01", "17:01", "22:01" }, config.LegacyFixedSlots);
         Assert.Equal("SYSTEM", config.TimeZone);
         Assert.Equal("gpt-5.6-luna", config.Model);
         Assert.Equal("low", config.ReasoningEffort);
@@ -162,7 +162,7 @@ public sealed class ConfigValidatorTests
         var defaults = AppConfigDefaults.Create();
         return defaults with
         {
-            Slots = slots ?? defaults.Slots,
+            LegacyFixedSlots = slots ?? defaults.LegacyFixedSlots,
             TimeZone = timeZone ?? defaults.TimeZone,
             Model = model ?? defaults.Model,
             ReasoningEffort = reasoningEffort ?? defaults.ReasoningEffort,

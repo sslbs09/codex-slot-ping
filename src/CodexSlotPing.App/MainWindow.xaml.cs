@@ -4,12 +4,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using CodexSlotPing.Core.Codex;
-using CodexSlotPing.Core.Configuration;
-using CodexSlotPing.Core.Scheduler;
-using CodexSlotPing.Core.Slots;
-using CodexSlotPing.Core.State;
-using CodexSlotPing.Core.Testing;
+using CodexSlotPing.App.ReadModels;
 using WpfButton = System.Windows.Controls.Button;
 using WpfClipboard = System.Windows.Clipboard;
 using WpfColorConverter = System.Windows.Media.ColorConverter;
@@ -82,34 +77,42 @@ public partial class MainWindow : Window
         };
         VersionText.Text = state.Codex.CliVersion ?? UiText.Get("Main.CliVersionUnavailable");
 
-        if (state.NextSlot is null)
+        if (state.Schedule.IsDeferredUntilResume)
         {
             NextSlotTimeText.Text = "—";
-            NextSlotCountdownText.Text = state.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
+            NextSlotCountdownText.Text = UiText.Get("Main.ScheduleRecalculateAfterResume");
+        }
+        else if (state.Schedule.NextAttemptAtUtc is not { } nextAttemptUtc)
+        {
+            NextSlotTimeText.Text = "—";
+            NextSlotCountdownText.Text = state.Scheduler.State == SchedulerViewState.TimezoneChanged
                 ? UiText.Get("Main.UpdateTimezoneForNext")
-                : UiText.Get("Main.NoEligibleFutureSlot");
+                : UiText.Get("Main.NoPlannedAttempt");
         }
         else
         {
-            var timeZone = TimeZoneInfo.FindSystemTimeZoneById(state.CurrentWindowsTimeZoneId);
-            var localStart = TimeZoneInfo.ConvertTime(state.NextSlot.StartUtc, timeZone);
-            NextSlotTimeText.Text = localStart.ToString("HH:mm");
-            var windowEnd = state.NextSlot.StartUtc.AddMinutes(4);
-            var remaining = state.NowUtc < windowEnd && state.NowUtc >= state.NextSlot.StartUtc
-                ? windowEnd - state.NowUtc
-                : state.NextSlot.StartUtc - state.NowUtc;
-            NextSlotCountdownText.Text = state.NowUtc >= state.NextSlot.StartUtc && state.NowUtc < windowEnd
-                ? UiText.Format("Main.AdmissionWindowClosesIn", FormatDuration(remaining))
-                : UiText.Format("Main.StartsIn", FormatDuration(remaining));
+            NextSlotTimeText.Text = nextAttemptUtc.ToLocalTime().ToString("g");
+            NextSlotCountdownText.Text = nextAttemptUtc <= state.NowUtc
+                ? UiText.Get("Main.AttemptPlannedNow")
+                : UiText.Format("Main.StartsIn", FormatDuration(nextAttemptUtc - state.NowUtc));
         }
 
         TodayRows.ItemsSource = state.TodaySlots.Select(slot => new TodayRow(
             slot.LocalTime.ToString("HH:mm"),
             FormatSlotStatus(slot.Status))).ToArray();
-        ModelText.Text = state.Config.Model;
-        ReasoningText.Text = UiText.FormatReasoningEffort(state.Config.ReasoningEffort);
-        SchedulerText.Text = FormatScheduler(state.Scheduler);
-        WakeText.Text = UiText.Get(state.EffectiveWakeToRun ? "State.Enabled" : "State.Disabled");
+        EligibilityDetailsText.Text = state.Eligibility.Details;
+        ModelText.Text = state.Automation.Model;
+        ReasoningText.Text = UiText.FormatReasoningEffort(state.Automation.ReasoningEffort);
+        SchedulerText.Text = UiText.FormatSchedulerState(state.Scheduler.State);
+        AutomationStatusText.Text = UiText.FormatAutomationControlState(
+            state.Automation.Enabled,
+            state.Automation.IsPaused,
+            state.Automation.IsPauseProtectionActive);
+        AutomationPauseButton.Content = UiText.Get(state.Automation.IsPauseProtectionActive
+            ? "Automation.Resume"
+            : "Automation.Pause");
+        AutomationPauseButton.IsEnabled = state.Automation.Enabled || state.Automation.IsPauseProtectionActive;
+        WakeText.Text = UiText.Get(state.Scheduler.EffectiveWakeToRun ? "State.Enabled" : "State.Disabled");
 
         var messages = new List<string>();
         if (!codexReady)
@@ -127,29 +130,84 @@ public partial class MainWindow : Window
 
         switch (state.Scheduler.State)
         {
-            case SchedulerState.NEEDS_REPAIR:
+            case SchedulerViewState.NeedsRepair:
                 messages.Add(state.Scheduler.DiagnosticCategory == "runner-action-mismatch"
                     ? UiText.Get("Scheduler.RepairPathChanged")
                     : UiText.Get("Scheduler.RepairContract"));
                 break;
-            case SchedulerState.TIMEZONE_CHANGED:
-                messages.Add(UiText.Format("Scheduler.TimezoneChanged", state.Config.TimeZone, state.CurrentWindowsTimeZoneId));
+            case SchedulerViewState.TimezoneChanged:
+                messages.Add(UiText.Format("Scheduler.TimezoneChanged", state.Automation.TimeZone, state.CurrentWindowsTimeZoneId));
                 break;
-            case SchedulerState.CONFLICT:
+            case SchedulerViewState.Conflict:
                 messages.Add(UiText.Get("Scheduler.Conflict"));
                 break;
-            case SchedulerState.ERROR:
-                messages.Add(UiText.Get("Scheduler.ReadFailed"));
+            case SchedulerViewState.Error:
+                messages.Add(UiText.Get(state.Scheduler.DiagnosticCategory == "scheduler-enabled-while-paused"
+                    ? "Scheduler.PauseDisableFailed"
+                    : "Scheduler.ReadFailed"));
                 break;
         }
 
         StatusMessageText.Text = string.Join(Environment.NewLine, messages);
-        TimezoneActionButton.Visibility = state.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
+        TimezoneActionButton.Visibility = state.Scheduler.State == SchedulerViewState.TimezoneChanged
             ? Visibility.Visible
             : Visibility.Collapsed;
     }
 
     private async void TestNow_Click(object sender, RoutedEventArgs e) => await RunTestNowFromTrayAsync();
+
+    private async void ToggleAutomation_Click(object sender, RoutedEventArgs e) =>
+        await ToggleAutomationAsync(showFailureDialog: false);
+
+    internal Task ToggleAutomationFromTrayAsync() => ToggleAutomationAsync(showFailureDialog: true);
+
+    private async Task ToggleAutomationAsync(bool showFailureDialog)
+    {
+        if (_screenState is null)
+        {
+            return;
+        }
+
+        var wasPaused = _screenState.Automation.IsPauseProtectionActive;
+        try
+        {
+            var operation = wasPaused
+                ? await _controller.ResumeAutomationAsync(CancellationToken.None)
+                : await _controller.PauseAutomationAsync(CancellationToken.None);
+            await RefreshAsync();
+
+            if (operation.Succeeded)
+            {
+                StatusMessageText.Text = UiText.Get(wasPaused
+                    ? "Automation.ResumedMessage"
+                    : "Automation.PausedMessage");
+                return;
+            }
+
+            var message = operation.DiagnosticCategory switch
+            {
+                "automation-pause-not-persisted-protected" =>
+                    UiText.Get("Automation.PauseNotPersistedProtected"),
+                "automation-control-save-failed" => UiText.Get("Automation.ControlSaveFailed"),
+                _ => UiText.Get("Automation.SchedulerSyncFailed")
+            };
+            StatusMessageText.Text = operation.DiagnosticCategory == "automation-pause-not-persisted-protected"
+                ? message
+                : $"{message} {UiText.FormatDiagnostic(operation.DiagnosticCategory ?? string.Empty)}";
+            if (showFailureDialog)
+            {
+                ShowTrayMessage(StatusMessageText.Text);
+            }
+        }
+        catch (Exception exception)
+        {
+            StatusMessageText.Text = UiText.Format("Settings.Exception", exception.Message);
+            if (showFailureDialog)
+            {
+                ShowTrayMessage(StatusMessageText.Text);
+            }
+        }
+    }
 
     internal async Task RunTestNowFromTrayAsync()
     {
@@ -160,8 +218,33 @@ public partial class MainWindow : Window
 
         ShowFromTray();
 
+        EligibilityView testNowDecision;
+        try
+        {
+            testNowDecision = await _controller.GetTestNowEligibilityViewAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            WpfMessageBox.Show(UiText.Format("Main.StatusRefreshFailed", exception.Message),
+                UiText.Get("Main.TestNowFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        if (!testNowDecision.RequiresConfirmation)
+        {
+            WpfMessageBox.Show(
+                testNowDecision.DetailsText,
+                UiText.Get("Main.TestNowResultTitle"),
+                MessageBoxButton.OK,
+                testNowDecision.IsEligible
+                    ? MessageBoxImage.Information
+                    : MessageBoxImage.Warning);
+            await RefreshAsync();
+            return;
+        }
+
         var answer = WpfMessageBox.Show(
-            UiText.Get("Main.TestNowConfirmBody"),
+            testNowDecision.TestNowConfirmationText,
             UiText.Get("Main.TestNowConfirmTitle"),
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
@@ -177,13 +260,20 @@ public partial class MainWindow : Window
         StatusMessageText.Text = UiText.Get("Main.TestNowRunning");
         try
         {
-            var result = await _controller.RunTestNowAsync(true, CancellationToken.None);
-            if (result is not null)
+            var response = await _controller.RunTestNowAsync(true, CancellationToken.None);
+            if (response?.Result is { } result)
             {
-                WpfMessageBox.Show(FormatTestResult(result), UiText.Get("Main.TestNowResultTitle"), MessageBoxButton.OK,
-                    result.Invocation.Classification == CodexResultClassification.CONFIRMED_SUCCESS
+                WpfMessageBox.Show(UiText.FormatTestResult(
+                        result.Classification, result.ElapsedMilliseconds, result.DiagnosticCategory),
+                    UiText.Get("Main.TestNowResultTitle"), MessageBoxButton.OK,
+                    result.Classification == TestResultViewStatus.ConfirmedSuccess
                         ? MessageBoxImage.Information
                         : MessageBoxImage.Warning);
+            }
+            else if (response is not null)
+            {
+                WpfMessageBox.Show(response.Decision.DetailsText,
+                    UiText.Get("Main.TestNowResultTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             else
             {
@@ -215,11 +305,24 @@ public partial class MainWindow : Window
             return;
         }
 
-        var window = new SettingsWindow(_controller, _screenState) { Owner = this };
+        var window = new SettingsWindow(_controller, _screenState, OnSettingsStateChanged) { Owner = this };
         if (window.ShowDialog() == true)
         {
             await RefreshAsync();
         }
+    }
+
+    private void OnSettingsStateChanged(AppScreenState state)
+    {
+        _screenState = state;
+        Render(state);
+        _tray?.UpdateState(state);
+    }
+
+    internal async void OpenSettingsFromTray()
+    {
+        ShowFromTray();
+        await OpenSettingsAsync();
     }
 
     private void OpenLogs_Click(object sender, RoutedEventArgs e)
@@ -371,14 +474,7 @@ public partial class MainWindow : Window
         await RefreshAsync();
     }
 
-    private static string FormatSlotStatus(FormalSlotStatus status) => UiText.FormatSlotStatus(status);
-
-    private static string FormatScheduler(SchedulerStatus status) => UiText.FormatSchedulerState(status.State);
-
-    private static string FormatTestResult(TestRunResult result) => UiText.FormatTestResult(
-        result.Invocation.Classification,
-        result.Invocation.ElapsedMilliseconds,
-        result.Invocation.DiagnosticCategory);
+    private static string FormatSlotStatus(SlotViewStatus status) => UiText.FormatSlotStatus(status);
 
     private static string FormatDuration(TimeSpan duration)
     {
