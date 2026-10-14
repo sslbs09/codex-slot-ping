@@ -346,7 +346,6 @@ public sealed class TaskSchedulerContractTests
             ReleaseComObject(registration);
             ReleaseComObject(definition);
             ReleaseComObject(root);
-            ReleaseComObject(service);
             return xml;
         }, CancellationToken.None);
 
