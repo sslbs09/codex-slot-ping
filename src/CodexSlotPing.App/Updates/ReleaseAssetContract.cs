@@ -1,4 +1,6 @@
-namespace CodexSlotPing.Update;
+using CodexSlotPing.Update;
+
+namespace CodexSlotPing.App.Updates;
 
 public static class ReleaseAssetContract
 {

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using CodexSlotPing.Update;
+using CodexSlotPing.App.Updates;
 
 namespace CodexSlotPing.Update.Tests;
 

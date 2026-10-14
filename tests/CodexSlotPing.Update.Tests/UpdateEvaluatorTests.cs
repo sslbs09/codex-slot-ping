@@ -1,4 +1,5 @@
 using CodexSlotPing.Update;
+using CodexSlotPing.App.Updates;
 
 namespace CodexSlotPing.Update.Tests;
 

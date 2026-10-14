@@ -1,5 +1,6 @@
 using System.Net.Http;
 using CodexSlotPing.App.ReadModels;
+using CodexSlotPing.App.Updates;
 using CodexSlotPing.Update;
 
 namespace CodexSlotPing.App;

@@ -1,10 +1,11 @@
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
-namespace CodexSlotPing.Update;
+namespace CodexSlotPing.App.Updates;
 
 public sealed class GitHubReleaseClient
 {

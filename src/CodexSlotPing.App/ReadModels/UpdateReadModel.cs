@@ -1,3 +1,4 @@
+using CodexSlotPing.App.Updates;
 using CodexSlotPing.Update;
 
 namespace CodexSlotPing.App.ReadModels;

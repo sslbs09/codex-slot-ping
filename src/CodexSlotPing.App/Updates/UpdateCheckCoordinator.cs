@@ -1,4 +1,6 @@
-namespace CodexSlotPing.Update;
+using System.Net.Http;
+
+namespace CodexSlotPing.App.Updates;
 
 public sealed class UpdateCheckCoordinator
 {

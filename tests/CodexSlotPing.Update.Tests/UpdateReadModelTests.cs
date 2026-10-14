@@ -1,11 +1,19 @@
 using CodexSlotPing.App.ReadModels;
 using CodexSlotPing.App;
+using CodexSlotPing.App.Updates;
 using CodexSlotPing.Update;
 
 namespace CodexSlotPing.Update.Tests;
 
 public sealed class UpdateReadModelTests
 {
+    [Fact]
+    public void ReleaseDiscoveryTypes_AreOwnedByTheAppAssembly()
+    {
+        Assert.Equal(typeof(AppUpdateController).Assembly, typeof(GitHubReleaseClient).Assembly);
+        Assert.Equal(typeof(AppUpdateController).Assembly, typeof(UpdateEvaluator).Assembly);
+    }
+
     [Fact]
     public async Task AppUpdateController_ProjectsNetworkFailureIntoUpdateStatus()
     {
