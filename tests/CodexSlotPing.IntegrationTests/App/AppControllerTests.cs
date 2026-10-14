@@ -140,7 +140,7 @@ public sealed class AppControllerTests
     }
 
     [Fact]
-    public async Task PausePersistenceFailure_ReportsTemporaryProtectionAndKeepsTestNowAvailable()
+    public async Task PausePersistenceAndSchedulerDisableFailure_ReportsTemporaryProtectionAndKeepsTestNowAvailable()
     {
         var fixture = new Fixture(
             AppConfigDefaults.Create() with { Enabled = true },
@@ -154,9 +154,15 @@ public sealed class AppControllerTests
             "temporary-pause-test-now", userConfirmed: true, CancellationToken.None);
         var screen = await fixture.Controller.RefreshAsync(CancellationToken.None);
         var tray = TraySummaryProjection.Create(screen, CultureInfo.GetCultureInfo("zh-CN"));
+        var failureMessage = UiText.FormatDiagnostic(
+            operation.DiagnosticCategory,
+            CultureInfo.GetCultureInfo("zh-CN"));
 
         Assert.False(operation.Succeeded);
         Assert.Equal("automation-pause-not-persisted-protected", operation.DiagnosticCategory);
+        Assert.Contains("暂停未能保存", failureMessage);
+        Assert.Contains("当前进程", failureMessage);
+        Assert.Contains("关闭应用后该保护不会保留", failureMessage);
         Assert.False(fixture.ConfigStore.Config.IsPaused);
         Assert.False(screen.Automation.IsPaused);
         Assert.True(screen.Automation.IsPauseProtectionActive);
@@ -166,6 +172,10 @@ public sealed class AppControllerTests
         Assert.True(screen.Schedule.IsDeferredUntilResume);
         Assert.Contains("恢复后重新计算计划", screen.Eligibility.Details);
         Assert.Contains("暂停未持久化", tray.Menu.AutomationControlText);
+        Assert.Equal(SchedulerViewState.Error, screen.Scheduler.State);
+        Assert.Equal("scheduler-enabled-while-paused", screen.Scheduler.DiagnosticCategory);
+        Assert.Equal(TraySummaryStatus.SchedulerError, tray.Status);
+        Assert.NotEqual(TraySummaryStatus.Paused, tray.Status);
     }
 
     [Fact]

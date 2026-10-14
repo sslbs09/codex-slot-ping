@@ -131,6 +131,24 @@ public sealed class AtomicJsonFileTests
     }
 
     [Fact]
+    public async Task SchemaV2ConfigWithoutIsPaused_DeserializesAsNotPaused()
+    {
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "config.json");
+        var store = new JsonConfigStore(
+            new AtomicJsonFile(new RecordingAtomicFileOperations()),
+            path);
+        const string legacy = "{\"schemaVersion\":2,\"enabled\":true,\"legacyFixedSlots\":[\"07:00\",\"12:01\",\"17:01\",\"22:01\"],\"timeZone\":\"SYSTEM\",\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"low\",\"prompt\":\"Keep this\",\"wakeToRun\":false,\"strictSlotWindowMinutes\":3,\"captureRawLogs\":false}";
+        await File.WriteAllTextAsync(path, legacy);
+
+        var loaded = await store.LoadOrCreateAsync(CancellationToken.None);
+
+        Assert.DoesNotContain("\"isPaused\"", legacy, StringComparison.Ordinal);
+        Assert.Equal(2, loaded.SchemaVersion);
+        Assert.False(loaded.IsPaused);
+    }
+
+    [Fact]
     public async Task V1Config_MigratesFixedSlotsAndPreservesOtherSettings()
     {
         using var directory = new TemporaryDirectory();
