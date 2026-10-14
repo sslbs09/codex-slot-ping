@@ -60,6 +60,7 @@ public static class UiText
             SchedulerViewState.NeedsRepair => "State.NeedsRepair",
             SchedulerViewState.TimezoneChanged => "State.TimezoneChanged",
             SchedulerViewState.Conflict => "State.Conflict",
+            SchedulerViewState.Error => "State.Error",
             _ => "State.Unknown"
         };
         return Get(key, culture ?? CultureInfo.CurrentUICulture);

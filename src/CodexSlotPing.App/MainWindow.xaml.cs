@@ -244,6 +244,12 @@ public partial class MainWindow : Window
         }
     }
 
+    internal async void OpenSettingsFromTray()
+    {
+        ShowFromTray();
+        await OpenSettingsAsync();
+    }
+
     private void OpenLogs_Click(object sender, RoutedEventArgs e)
         => OpenLogsFromTray();
 

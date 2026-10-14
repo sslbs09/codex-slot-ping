@@ -107,6 +107,7 @@
   <data name="State.NeedsRepair" xml:space="preserve"><value>Needs repair</value></data>
   <data name="State.TimezoneChanged" xml:space="preserve"><value>Timezone changed</value></data>
   <data name="State.Conflict" xml:space="preserve"><value>Conflict</value></data>
+  <data name="State.Error" xml:space="preserve"><value>Error</value></data>
   <data name="State.Unknown" xml:space="preserve"><value>Unknown</value></data>
   <data name="Slot.Confirmed" xml:space="preserve"><value>✓ Confirmed</value></data>
   <data name="Slot.AttemptedUnconfirmed" xml:space="preserve"><value>△ Attempted · unconfirmed</value></data>
@@ -118,6 +119,16 @@
   <data name="TestResult.Reason" xml:space="preserve"><value>Reason: {0}</value></data>
   <data name="Tray.Open" xml:space="preserve"><value>Open</value></data>
   <data name="Tray.TestNow" xml:space="preserve"><value>Test now</value></data>
+  <data name="Tray.StatusLabel" xml:space="preserve"><value>Automation status</value></data>
+  <data name="Tray.Settings" xml:space="preserve"><value>Settings</value></data>
+  <data name="Tray.Tooltip" xml:space="preserve"><value>Codex Slot Ping · {0}</value></data>
+  <data name="Tray.Status.SchedulerError" xml:space="preserve"><value>Scheduler error</value></data>
+  <data name="Tray.Status.Paused" xml:space="preserve"><value>Automation is paused</value></data>
+  <data name="Tray.Status.Disabled" xml:space="preserve"><value>Automation is disabled</value></data>
+  <data name="Tray.Status.Blocked" xml:space="preserve"><value>Automatic scheduling is blocked · {0}</value></data>
+  <data name="Tray.Status.Unknown" xml:space="preserve"><value>Current conditions cannot be confirmed</value></data>
+  <data name="Tray.Status.Waiting" xml:space="preserve"><value>Waiting for the next planned check · {0}</value></data>
+  <data name="Tray.Status.Ready" xml:space="preserve"><value>Conditions met · waiting for planned wake-up</value></data>
   <data name="Tray.SchedulerLabel" xml:space="preserve"><value>Scheduler state</value></data>
   <data name="Tray.SchedulerState" xml:space="preserve"><value>Scheduler state: {0}</value></data>
   <data name="Tray.WakeComputer" xml:space="preserve"><value>Wake computer</value></data>

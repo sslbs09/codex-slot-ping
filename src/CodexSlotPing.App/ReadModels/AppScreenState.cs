@@ -60,7 +60,10 @@ public sealed record AutomationView(
     string Prompt,
     bool WakeToRun,
     int StrictSlotWindowMinutes,
-    bool CaptureRawLogs);
+    bool CaptureRawLogs)
+{
+    public bool IsPaused { get; init; }
+}
 
 public sealed record EligibilityView(
     EligibilityViewStatus Status,

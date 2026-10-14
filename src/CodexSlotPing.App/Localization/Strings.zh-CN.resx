@@ -107,6 +107,7 @@
   <data name="State.NeedsRepair" xml:space="preserve"><value>需要修复</value></data>
   <data name="State.TimezoneChanged" xml:space="preserve"><value>时区已变化</value></data>
   <data name="State.Conflict" xml:space="preserve"><value>存在冲突</value></data>
+  <data name="State.Error" xml:space="preserve"><value>异常</value></data>
   <data name="State.Unknown" xml:space="preserve"><value>未知</value></data>
   <data name="Slot.Confirmed" xml:space="preserve"><value>✓ 已确认</value></data>
   <data name="Slot.AttemptedUnconfirmed" xml:space="preserve"><value>△ 已尝试 · 未确认</value></data>
@@ -118,6 +119,16 @@
   <data name="TestResult.Reason" xml:space="preserve"><value>原因：{0}</value></data>
   <data name="Tray.Open" xml:space="preserve"><value>打开</value></data>
   <data name="Tray.TestNow" xml:space="preserve"><value>立即测试</value></data>
+  <data name="Tray.StatusLabel" xml:space="preserve"><value>自动化状态</value></data>
+  <data name="Tray.Settings" xml:space="preserve"><value>设置</value></data>
+  <data name="Tray.Tooltip" xml:space="preserve"><value>Codex Slot Ping · {0}</value></data>
+  <data name="Tray.Status.SchedulerError" xml:space="preserve"><value>调度器异常</value></data>
+  <data name="Tray.Status.Paused" xml:space="preserve"><value>自动调度已暂停</value></data>
+  <data name="Tray.Status.Disabled" xml:space="preserve"><value>自动调度未启用</value></data>
+  <data name="Tray.Status.Blocked" xml:space="preserve"><value>自动调度被阻止 · {0}</value></data>
+  <data name="Tray.Status.Unknown" xml:space="preserve"><value>当前无法确认条件</value></data>
+  <data name="Tray.Status.Waiting" xml:space="preserve"><value>等待下一次计划检查 · {0}</value></data>
+  <data name="Tray.Status.Ready" xml:space="preserve"><value>当前条件满足 · 等待计划唤醒</value></data>
   <data name="Tray.SchedulerLabel" xml:space="preserve"><value>计划任务</value></data>
   <data name="Tray.SchedulerState" xml:space="preserve"><value>计划任务：{0}</value></data>
   <data name="Tray.WakeComputer" xml:space="preserve"><value>唤醒电脑</value></data>
