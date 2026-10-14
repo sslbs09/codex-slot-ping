@@ -9,6 +9,8 @@ public enum UpdateViewStatus
     Checking,
     UpToDate,
     UpdateAvailable,
+    Downloading,
+    ReadyToInstall,
     Failed
 }
 
@@ -21,7 +23,12 @@ public enum UpdateFailureCategory
     MalformedResponse,
     NoStableRelease,
     InvalidAssetContract,
-    InvalidCurrentVersion
+    InvalidCurrentVersion,
+    DownloadFailed,
+    ChecksumInvalid,
+    PackageInvalid,
+    VersionMismatch,
+    StagingIoFailure
 }
 
 public sealed record UpdateAssetView(string FileName, string DownloadUrl, long Size);
@@ -36,13 +43,27 @@ public sealed record UpdateReadModel(
     UpdateAssetView? ZipAsset,
     UpdateAssetView? ChecksumAsset,
     UpdateFailureCategory? ErrorCategory,
-    DateTimeOffset? CheckedAtUtc)
+    DateTimeOffset? CheckedAtUtc,
+    int? DownloadProgressPercent = null,
+    string? StagedVersion = null,
+    string? OperationId = null)
 {
     public static UpdateReadModel Unknown(string currentVersion) =>
         new(UpdateViewStatus.Unknown, currentVersion, null, null, null, null, null, null, null, null);
 
     public static UpdateReadModel Checking(string currentVersion) =>
         new(UpdateViewStatus.Checking, currentVersion, null, null, null, null, null, null, null, null);
+
+    public static UpdateReadModel Downloading(string currentVersion, string targetVersion, int? percentComplete = null) =>
+        new(UpdateViewStatus.Downloading, currentVersion, targetVersion, null, null, null, null, null, null, null,
+            Math.Clamp(percentComplete ?? 0, 0, 100));
+
+    public static UpdateReadModel ReadyToInstall(string currentVersion, string targetVersion, string operationId) =>
+        new(UpdateViewStatus.ReadyToInstall, currentVersion, targetVersion, null, null, null, null, null, null, null,
+            null, targetVersion, operationId);
+
+    public static UpdateReadModel Failed(string currentVersion, string? targetVersion, UpdateFailureCategory category) =>
+        new(UpdateViewStatus.Failed, currentVersion, targetVersion, null, null, null, null, null, category, null);
 }
 
 public static class UpdateReadModelProjection

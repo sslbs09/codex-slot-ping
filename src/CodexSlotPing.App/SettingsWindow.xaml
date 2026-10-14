@@ -86,6 +86,9 @@
             <Button x:Name="CheckForUpdatesButton" Content="{loc:Loc Settings.CheckForUpdates}"
                     Style="{StaticResource ActionButton}" HorizontalAlignment="Left" Margin="0,3,0,4"
                     Click="CheckForUpdates_Click" />
+            <Button x:Name="DownloadUpdateButton" Content="{loc:Loc Settings.DownloadUpdate}"
+                    Style="{StaticResource ActionButton}" HorizontalAlignment="Left" Margin="0,3,0,4"
+                    Visibility="Collapsed" Click="DownloadUpdate_Click" />
             <TextBlock x:Name="UpdateStatusText" Text="—" Foreground="#424A44" TextWrapping="Wrap" />
             <TextBlock x:Name="UpdateReleaseText" TextWrapping="Wrap" Foreground="#58615A" Margin="0,5,0,0" />
             <TextBlock x:Name="UpdateReleaseUrlText" TextWrapping="Wrap" Foreground="#58615A" Margin="0,4,0,0" />

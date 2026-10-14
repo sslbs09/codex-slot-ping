@@ -174,10 +174,13 @@
   <data name="Settings.SchedulerWarning" xml:space="preserve"><value>Windows Scheduler only wakes Runner at one planned time. Runner rechecks Core eligibility before any Codex request.</value></data>
   <data name="Settings.UpdateSectionTitle" xml:space="preserve"><value>Application updates</value></data>
   <data name="Settings.CheckForUpdates" xml:space="preserve"><value>Check for updates</value></data>
+  <data name="Settings.DownloadUpdate" xml:space="preserve"><value>Download update</value></data>
   <data name="Update.Unknown" xml:space="preserve"><value>Not checked yet.</value></data>
   <data name="Update.Checking" xml:space="preserve"><value>Checking GitHub Releases…</value></data>
   <data name="Update.UpToDate" xml:space="preserve"><value>You are using version {0}; no newer stable release is available.</value></data>
   <data name="Update.Available" xml:space="preserve"><value>Version {0} is available.</value></data>
+  <data name="Update.Downloading" xml:space="preserve"><value>Downloading update{0}…</value></data>
+  <data name="Update.ReadyToInstall" xml:space="preserve"><value>Version {0} is downloaded and verified. It is ready to install.</value></data>
   <data name="Update.Failed" xml:space="preserve"><value>Update check failed ({0}).</value></data>
   <data name="Update.Error.Network" xml:space="preserve"><value>network unavailable</value></data>
   <data name="Update.Error.Timeout" xml:space="preserve"><value>request timed out</value></data>
@@ -187,6 +190,11 @@
   <data name="Update.Error.NoStableRelease" xml:space="preserve"><value>no valid stable release found</value></data>
   <data name="Update.Error.InvalidAssetContract" xml:space="preserve"><value>release package metadata is invalid</value></data>
   <data name="Update.Error.InvalidCurrentVersion" xml:space="preserve"><value>application version is invalid</value></data>
+  <data name="Update.Error.DownloadFailed" xml:space="preserve"><value>package download failed</value></data>
+  <data name="Update.Error.ChecksumInvalid" xml:space="preserve"><value>package checksum is invalid</value></data>
+  <data name="Update.Error.PackageInvalid" xml:space="preserve"><value>downloaded package is invalid</value></data>
+  <data name="Update.Error.VersionMismatch" xml:space="preserve"><value>package executable versions do not match</value></data>
+  <data name="Update.Error.StagingIoFailure" xml:space="preserve"><value>could not stage the update package</value></data>
   <data name="Settings.Saved" xml:space="preserve"><value>Settings saved.</value></data>
   <data name="Settings.InstallConfirmTitle" xml:space="preserve"><value>Confirm scheduler installation</value></data>
   <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>This creates or updates the owned Windows task. When local policy allows an attempt, it wakes Runner, which rechecks eligibility before sending your configured prompt to Codex. Continue?</value></data>

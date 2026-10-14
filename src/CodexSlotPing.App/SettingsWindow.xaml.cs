@@ -273,7 +273,24 @@ public partial class SettingsWindow : Window
         }
         finally
         {
-            CheckForUpdatesButton.IsEnabled = true;
+            CheckForUpdatesButton.IsEnabled = _updateController.CurrentState.Status is not UpdateViewStatus.Checking and not UpdateViewStatus.Downloading;
+        }
+    }
+
+    private async void DownloadUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        DownloadUpdateButton.IsEnabled = false;
+        try
+        {
+            await _updateController.DownloadUpdateAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            UpdateStatusText.Text = UiText.Format("Settings.Exception", exception.Message);
+        }
+        finally
+        {
+            RenderUpdateState(_updateController.CurrentState);
         }
     }
 
@@ -287,6 +304,8 @@ public partial class SettingsWindow : Window
             UpdateViewStatus.Checking => UiText.Get("Update.Checking"),
             UpdateViewStatus.UpToDate => UiText.Format("Update.UpToDate", state.CurrentVersion),
             UpdateViewStatus.UpdateAvailable => UiText.Format("Update.Available", state.TargetVersion ?? string.Empty),
+            UpdateViewStatus.Downloading => UiText.Format("Update.Downloading", state.DownloadProgressPercent is int percent ? $" ({percent}%)" : string.Empty),
+            UpdateViewStatus.ReadyToInstall => UiText.Format("Update.ReadyToInstall", state.StagedVersion ?? state.TargetVersion ?? string.Empty),
             UpdateViewStatus.Failed => UiText.Format("Update.Failed", UiText.Get(state.ErrorCategory switch
             {
                 UpdateFailureCategory.Network => "Update.Error.Network",
@@ -296,6 +315,11 @@ public partial class SettingsWindow : Window
                 UpdateFailureCategory.NoStableRelease => "Update.Error.NoStableRelease",
                 UpdateFailureCategory.InvalidAssetContract => "Update.Error.InvalidAssetContract",
                 UpdateFailureCategory.InvalidCurrentVersion => "Update.Error.InvalidCurrentVersion",
+                UpdateFailureCategory.DownloadFailed => "Update.Error.DownloadFailed",
+                UpdateFailureCategory.ChecksumInvalid => "Update.Error.ChecksumInvalid",
+                UpdateFailureCategory.PackageInvalid => "Update.Error.PackageInvalid",
+                UpdateFailureCategory.VersionMismatch => "Update.Error.VersionMismatch",
+                UpdateFailureCategory.StagingIoFailure => "Update.Error.StagingIoFailure",
                 _ => "Update.Error.Api"
             })),
             _ => UiText.Get("Update.Unknown")
@@ -310,6 +334,9 @@ public partial class SettingsWindow : Window
             .Select(asset => $"{asset!.FileName} ({asset.Size:N0} bytes)");
         UpdateAssetText.Text = string.Join(Environment.NewLine, assetLines);
         UpdateAssetText.Visibility = string.IsNullOrWhiteSpace(UpdateAssetText.Text) ? Visibility.Collapsed : Visibility.Visible;
+        DownloadUpdateButton.Visibility = state.Status == UpdateViewStatus.UpdateAvailable ? Visibility.Visible : Visibility.Collapsed;
+        DownloadUpdateButton.IsEnabled = state.Status == UpdateViewStatus.UpdateAvailable;
+        CheckForUpdatesButton.IsEnabled = state.Status is not UpdateViewStatus.Checking and not UpdateViewStatus.Downloading;
     }
 
     private void RenderAutomationControl()

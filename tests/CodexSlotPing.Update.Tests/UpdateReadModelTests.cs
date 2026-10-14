@@ -54,6 +54,41 @@ public sealed class UpdateReadModelTests
         Assert.Equal(checkedAt, first.CheckedAtUtc);
 
         var propertyTypes = typeof(UpdateReadModel).GetProperties().Select(property => property.PropertyType);
-        Assert.DoesNotContain(propertyTypes, type => type == typeof(GitHubRelease) || type == typeof(GitHubReleaseAsset));
+        Assert.DoesNotContain(propertyTypes, type => type == typeof(GitHubRelease) || type == typeof(GitHubReleaseAsset) ||
+            type == typeof(UpdateEvaluation) || type == typeof(PackageManifest) || type == typeof(ReadyToInstallDescriptor));
+    }
+
+    [Fact]
+    public void DownloadingReadModel_ProjectsProgressWithoutInstallingState()
+    {
+        var model = UpdateReadModel.Downloading("0.2.0", "0.3.0", 42);
+
+        Assert.Equal(UpdateViewStatus.Downloading, model.Status);
+        Assert.Equal(42, model.DownloadProgressPercent);
+        Assert.Null(model.OperationId);
+        Assert.DoesNotContain("Installing", Enum.GetNames<UpdateViewStatus>());
+    }
+
+    [Fact]
+    public void ReadyToInstallReadModel_ContainsOnlyStablePrimitiveStageFacts()
+    {
+        var model = UpdateReadModel.ReadyToInstall("0.2.0", "0.3.0", "operation-1");
+
+        Assert.Equal(UpdateViewStatus.ReadyToInstall, model.Status);
+        Assert.Equal("operation-1", model.OperationId);
+        Assert.Equal("0.3.0", model.StagedVersion);
+        var propertyTypes = typeof(UpdateReadModel).GetProperties().Select(property => property.PropertyType);
+        Assert.DoesNotContain(propertyTypes, type => type == typeof(PackageManifest) || type == typeof(ReadyToInstallDescriptor));
+    }
+
+    [Fact]
+    public void FailedReadModel_ProjectsTypedPackageFailureDeterministically()
+    {
+        var first = UpdateReadModel.Failed("0.2.0", "0.3.0", UpdateFailureCategory.ChecksumInvalid);
+        var second = UpdateReadModel.Failed("0.2.0", "0.3.0", UpdateFailureCategory.ChecksumInvalid);
+
+        Assert.Equal(UpdateViewStatus.Failed, first.Status);
+        Assert.Equal(UpdateFailureCategory.ChecksumInvalid, first.ErrorCategory);
+        Assert.Equal(first, second);
     }
 }
