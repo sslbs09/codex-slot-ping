@@ -1,6 +1,6 @@
 # Scheduling Semantics v2
 
-**Status: implemented for the v0.1 release candidate through M3-A, M3-B1, M3-B2, M3-B2.1, and M3-C.** This page records the current behavior; it is no longer a pending design proposal.
+**Status: current behavior for v0.2.0.** This page records implemented scheduling behavior; it is not a pending design proposal.
 
 ## Eligibility and local attempts
 
@@ -18,9 +18,17 @@ An eligible decision plans a one-shot trigger. A future local eligibility time p
 
 Legacy fixed slots remain in configuration/state for diagnostics and migration only. They do not generate triggers and are not the scheduler authority.
 
-## Explicitly outside v0.1
+## Pause and manual Test Now
+
+Pause blocks automatic scheduling while leaving automation enabled. Resume recalculates and writes a fresh plan. Test Now remains an explicit manual request during Pause; it may count toward Codex usage.
+
+If persisting Pause fails, temporary fail-closed protection applies only while the current App/Windows session remains active. It does not survive an App or Windows restart.
+
+## Known limitations
 
 - Observing Codex usage made outside this application
+- Complete execution history
+- Task Runtime or Provider framework behavior
 - Private Codex API access
 - Quota-reset prediction
 - Weekly quota detection or determination

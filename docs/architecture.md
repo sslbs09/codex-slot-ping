@@ -22,7 +22,7 @@ Core 根据本地状态和 eligibility policy 决定是否允许本地尝试，�
 
 ## Component ownership
 
-- **App**：WPF 界面、用户设置、Test Now 确认、托盘入口及 Scheduler 生命周期管理；展示 Core 提供的 decision。
+- **App**：WPF 界面、用户设置、Test Now 确认、托盘入口及 Scheduler 生命周期管理；拥有 App-owned Read Model，供 Main、Settings、Tray 共用状态与 eligibility 说明。
 - **Eligibility Core**：拥有本地尝试 eligibility、decision reason、confidence 和下一次计划尝试计算。
 - **SchedulePlan / SchedulingCoordinator**：把 Core decision 映射为 Scheduler 可执行的 one-shot 计划，不解释 quota 或 usage。
 - **Windows Task Scheduler**：按 SchedulePlan 唤醒 Runner，验证任务配置，并使用 `IgnoreNew` 处理重叠实例。
@@ -31,6 +31,6 @@ Core 根据本地状态和 eligibility policy 决定是否允许本地尝试，�
 
 旧固定 slots 保留为诊断和迁移数据，不生成 Scheduler trigger，也不是当前调度权威。
 
-## v0.1 limits
+## Known limits
 
-本地计划时间不是 Codex 服务端额度 reset 时间。应用外的 Codex 使用不可观察；v0.1 不调用私有 API、不预测 reset，也不判断 weekly quota。已观察 usage limit 且没有可信 reset 时间时，自动调度不创建 trigger。
+本地计划时间不是 Codex 服务端额度 reset 时间。应用外的 Codex 使用不可观察；应用不使用私有 API、不预测 reset，也不判断 weekly quota。已观察 usage limit 且没有可信 reset 时间时，自动调度不创建 trigger。
