@@ -142,6 +142,7 @@ public sealed class AppControllerTests
     [Fact]
     public async Task PausePersistenceAndSchedulerDisableFailure_ReportsTemporaryProtectionAndKeepsTestNowAvailable()
     {
+        using var uiCulture = UseUiCulture("zh-CN");
         var fixture = new Fixture(
             AppConfigDefaults.Create() with { Enabled = true },
             Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath));
@@ -205,6 +206,7 @@ public sealed class AppControllerTests
     [Fact]
     public async Task Refresh_WhenPersistentlyPaused_HidesPlanAndExplainsRecalculationOnResume()
     {
+        using var uiCulture = UseUiCulture("zh-CN");
         var fixture = new Fixture(
             AppConfigDefaults.Create() with { Enabled = true, IsPaused = true },
             Status(SchedulerState.OWNED_DISABLED, exists: true, owned: true, enabled: false, RunnerPath));
@@ -218,6 +220,18 @@ public sealed class AppControllerTests
         Assert.True(screen.Schedule.IsDeferredUntilResume);
         Assert.Contains("恢复后重新计算计划", screen.Eligibility.Details);
         Assert.Equal("自动调度已暂停 · 恢复后重新计算计划", tray.StatusSummary);
+    }
+
+    private static IDisposable UseUiCulture(string cultureName)
+    {
+        var previousCulture = CultureInfo.CurrentUICulture;
+        CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(cultureName);
+        return new UiCultureScope(previousCulture);
+    }
+
+    private sealed class UiCultureScope(CultureInfo previousCulture) : IDisposable
+    {
+        public void Dispose() => CultureInfo.CurrentUICulture = previousCulture;
     }
 
     [Fact]
