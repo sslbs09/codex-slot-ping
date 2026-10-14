@@ -50,6 +50,13 @@ public sealed class FormalSlotClaimService
         return Task.Run(() => TryClaimScheduledAttempt(cancellationToken), CancellationToken.None);
     }
 
+    public Task<bool> SetAutomationPausedAsync(bool isPaused, CancellationToken cancellationToken)
+    {
+        // Serialize control intent changes with claims so a claim either completes before
+        // Pause is committed or observes the persisted pause and is rejected.
+        return Task.Run(() => SetAutomationPaused(isPaused, cancellationToken), CancellationToken.None);
+    }
+
     public Task<EligibilityDecision> GetEligibilityDecisionAsync(
         EligibilityRequest request,
         CancellationToken cancellationToken)
@@ -89,6 +96,49 @@ public sealed class FormalSlotClaimService
         var state = StateDocumentMigrator.MigrateV1ToV2(
             _stateStore.LoadAsync(cancellationToken).GetAwaiter().GetResult());
         return _eligibilityEvaluator.Evaluate(state.Eligibility!, request);
+    }
+
+    private bool SetAutomationPaused(bool isPaused, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        StateMutexLease? lease;
+        try
+        {
+            lease = _stateMutex.TryAcquire(MutexTimeout);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return false;
+        }
+
+        if (lease is null)
+        {
+            return false;
+        }
+
+        using (lease)
+        {
+            try
+            {
+                var config = _configStore.LoadOrCreateAsync(cancellationToken).GetAwaiter().GetResult();
+                if (config.IsPaused == isPaused)
+                {
+                    return true;
+                }
+
+                _configStore.SaveAsync(config with { IsPaused = isPaused }, cancellationToken)
+                    .GetAwaiter().GetResult();
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is InvalidDataException or IOException or JsonException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
     }
 
     private TestNowClaimResult TryClaimTestNow(
@@ -345,6 +395,11 @@ public sealed class FormalSlotClaimService
                 return Blocked(SlotClaimBlockReason.ConfigurationDisabled);
             }
 
+            if (config.IsPaused)
+            {
+                return Blocked(SlotClaimBlockReason.AutomationPaused);
+            }
+
             var nowUtc = _clock.UtcNow.ToUniversalTime();
             var eligibilityState = state.Eligibility! with { HighestObservedUtc = state.HighestObservedUtc };
             var decision = _eligibilityEvaluator.Evaluate(
@@ -545,6 +600,11 @@ public sealed class FormalSlotClaimService
             if (!config.Enabled)
             {
                 return Blocked(SlotClaimBlockReason.ConfigurationDisabled);
+            }
+
+            if (config.IsPaused)
+            {
+                return Blocked(SlotClaimBlockReason.AutomationPaused);
             }
 
             var nowUtc = _clock.UtcNow.ToUniversalTime();

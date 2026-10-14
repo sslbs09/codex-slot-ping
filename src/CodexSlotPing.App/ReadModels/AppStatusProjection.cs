@@ -32,13 +32,23 @@ public static class AppStatusProjection
         ArgumentNullException.ThrowIfNull(codexEnvironment);
         ArgumentNullException.ThrowIfNull(todaySlots);
 
+        var scheduler = ProjectScheduler(schedulerStatus, config.WakeToRun);
+        if (config.IsPaused && scheduler.IsEnabled)
+        {
+            scheduler = scheduler with
+            {
+                State = SchedulerViewState.Error,
+                DiagnosticCategory = "scheduler-enabled-while-paused"
+            };
+        }
+
         return new AppScreenState(
             ProjectAutomation(config),
             EligibilityDecisionProjection.Create(
                 eligibilityDecision,
                 nextPlannedAttemptAtUtc: schedulePlan.OneShotTriggerAtUtc),
             new ScheduleView(schedulePlan.OneShotTriggerAtUtc),
-            ProjectScheduler(schedulerStatus, config.WakeToRun),
+            scheduler,
             ProjectCodexEnvironment(codexEnvironment),
             nextSlot is null ? null : new NextSlotView(nextSlot.Position, nextSlot.StartUtc),
             todaySlots.Select(ProjectTodaySlot).ToArray(),
@@ -60,7 +70,10 @@ public static class AppStatusProjection
             config.Prompt,
             config.WakeToRun,
             config.StrictSlotWindowMinutes,
-            config.CaptureRawLogs);
+            config.CaptureRawLogs)
+        {
+            IsPaused = config.IsPaused
+        };
     }
 
     public static AppConfig ToConfig(AutomationView automation, AppConfig currentConfig)
@@ -78,6 +91,7 @@ public static class AppStatusProjection
             WakeToRun = automation.WakeToRun,
             StrictSlotWindowMinutes = automation.StrictSlotWindowMinutes,
             CaptureRawLogs = automation.CaptureRawLogs
+            // IsPaused is changed only through the mutex-protected control operation.
         };
     }
 

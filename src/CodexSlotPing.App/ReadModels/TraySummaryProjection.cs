@@ -17,6 +17,9 @@ public enum TraySummaryStatus
 
 public sealed record TrayMenuState(
     string StatusSummary,
+    string AutomationControlText,
+    string PauseResumeText,
+    bool PauseResumeEnabled,
     string SchedulerText,
     bool WakeToRunChecked);
 
@@ -49,6 +52,13 @@ public static class TraySummaryProjection
             tooltip,
             new TrayMenuState(
                 summary,
+                string.Format(
+                    selectedCulture,
+                    UiText.Get("Tray.AutomationControl", selectedCulture),
+                    UiText.FormatAutomationControlState(
+                        state.Automation.Enabled, state.Automation.IsPaused, selectedCulture)),
+                UiText.Get(state.Automation.IsPaused ? "Automation.Resume" : "Automation.Pause", selectedCulture),
+                state.Automation.Enabled || state.Automation.IsPaused,
                 UiText.FormatTraySchedulerState(state.Scheduler.State, selectedCulture),
                 state.Scheduler.EffectiveWakeToRun));
     }
@@ -104,6 +114,12 @@ public static class TraySummaryProjection
             or SchedulerViewState.Error)
         {
             return true;
+        }
+
+        if (state.Automation.IsPaused)
+        {
+            return state.Scheduler.State is not SchedulerViewState.Disabled
+                and not SchedulerViewState.NotInstalled || state.Scheduler.IsEnabled;
         }
 
         return state.Automation.Enabled

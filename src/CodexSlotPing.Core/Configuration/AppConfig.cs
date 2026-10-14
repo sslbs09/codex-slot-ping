@@ -8,6 +8,10 @@ public sealed record AppConfig
 
     public required bool Enabled { get; init; }
 
+    // User intent to suspend automatic scheduled claims without disabling automation.
+    // Missing values in existing schema v2 files deserialize as false.
+    public bool IsPaused { get; init; }
+
     // Read-only compatibility for schema v1 input. JsonConfigStore migrates it
     // into LegacyFixedSlots and omits this property when writing schema v2.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

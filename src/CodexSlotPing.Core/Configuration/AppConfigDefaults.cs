@@ -6,6 +6,7 @@ public static class AppConfigDefaults
     {
         SchemaVersion = 2,
         Enabled = true,
+        IsPaused = false,
         LegacyFixedSlots = ["07:00", "12:01", "17:01", "22:01"],
         TimeZone = "SYSTEM",
         Model = "gpt-5.6-luna",

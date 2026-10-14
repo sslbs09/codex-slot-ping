@@ -22,6 +22,7 @@
   <data name="Main.Model" xml:space="preserve"><value>Model</value></data>
   <data name="Main.Reasoning" xml:space="preserve"><value>Reasoning</value></data>
   <data name="Main.Scheduler" xml:space="preserve"><value>Scheduler</value></data>
+  <data name="Main.AutomationControl" xml:space="preserve"><value>Automation control</value></data>
   <data name="Main.WakeComputer" xml:space="preserve"><value>Wake computer</value></data>
   <data name="Main.CopyInstructions" xml:space="preserve"><value>Copy instructions</value></data>
   <data name="Main.TimezoneAction" xml:space="preserve"><value>Use current timezone and update scheduler</value></data>
@@ -52,6 +53,7 @@
   <data name="Scheduler.TimezoneChanged" xml:space="preserve"><value>Timezone changed / scheduler needs update. Configured: {0}; current: {1}.</value></data>
   <data name="Scheduler.Conflict" xml:space="preserve"><value>A same-name task is not owned by this app; it was left untouched.</value></data>
   <data name="Scheduler.ReadFailed" xml:space="preserve"><value>Task Scheduler state could not be verified.</value></data>
+  <data name="Scheduler.PauseDisableFailed" xml:space="preserve"><value>Scheduler is still enabled while automation is paused.</value></data>
   <data name="Diagnostic.CodexNotFound" xml:space="preserve"><value>Codex CLI was not found or its native executable is missing.</value></data>
   <data name="Diagnostic.CliVersionUnknown" xml:space="preserve"><value>Codex CLI version could not be confirmed.</value></data>
   <data name="Diagnostic.LoginUnknown" xml:space="preserve"><value>ChatGPT login status could not be confirmed.</value></data>
@@ -130,10 +132,22 @@
   <data name="Tray.Status.Waiting" xml:space="preserve"><value>Waiting for the next planned check · {0}</value></data>
   <data name="Tray.Status.Ready" xml:space="preserve"><value>Conditions met · waiting for planned wake-up</value></data>
   <data name="Tray.SchedulerLabel" xml:space="preserve"><value>Scheduler state</value></data>
+  <data name="Tray.AutomationControl" xml:space="preserve"><value>Automation: {0}</value></data>
+  <data name="Tray.AutomationControlLabel" xml:space="preserve"><value>Automation control</value></data>
   <data name="Tray.SchedulerState" xml:space="preserve"><value>Scheduler state: {0}</value></data>
   <data name="Tray.WakeComputer" xml:space="preserve"><value>Wake computer</value></data>
   <data name="Tray.OpenLogs" xml:space="preserve"><value>Open logs</value></data>
   <data name="Tray.Exit" xml:space="preserve"><value>Exit</value></data>
+  <data name="Automation.State.Enabled" xml:space="preserve"><value>Enabled</value></data>
+  <data name="Automation.State.Paused" xml:space="preserve"><value>Paused</value></data>
+  <data name="Automation.State.Disabled" xml:space="preserve"><value>Disabled</value></data>
+  <data name="Automation.State.DisabledAndPaused" xml:space="preserve"><value>Disabled · pause retained</value></data>
+  <data name="Automation.Pause" xml:space="preserve"><value>Pause automation</value></data>
+  <data name="Automation.Resume" xml:space="preserve"><value>Resume automation</value></data>
+  <data name="Automation.PausedMessage" xml:space="preserve"><value>Automatic scheduling is paused. Test Now remains available after confirmation.</value></data>
+  <data name="Automation.ResumedMessage" xml:space="preserve"><value>Automatic scheduling resumed with a fresh plan.</value></data>
+  <data name="Automation.ControlSaveFailed" xml:space="preserve"><value>Automation control could not be saved.</value></data>
+  <data name="Automation.SchedulerSyncFailed" xml:space="preserve"><value>Automation control was saved, but the scheduler could not be synchronized.</value></data>
   <data name="Settings.WindowTitle" xml:space="preserve"><value>Codex Slot Ping settings</value></data>
   <data name="Settings.Header" xml:space="preserve"><value>SETTINGS</value></data>
   <data name="Settings.SectionTitle" xml:space="preserve"><value>Schedule and request</value></data>
@@ -158,6 +172,7 @@
   <data name="Settings.InstallConfirmTitle" xml:space="preserve"><value>Confirm scheduler installation</value></data>
   <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>This creates or updates the owned Windows task. When local policy allows an attempt, it wakes Runner, which rechecks eligibility before sending your configured prompt to Codex. Continue?</value></data>
   <data name="Settings.InstallSuccess" xml:space="preserve"><value>Scheduler installed and read back as ON.</value></data>
+  <data name="Settings.InstallPausedSuccess" xml:space="preserve"><value>Scheduler plan updated and left OFF while automation is paused.</value></data>
   <data name="Settings.DisableConfirmTitle" xml:space="preserve"><value>Disable scheduler</value></data>
   <data name="Settings.DisableConfirmBody" xml:space="preserve"><value>Disable the owned Codex Slot Ping scheduled task?</value></data>
   <data name="Settings.DisableSuccess" xml:space="preserve"><value>Scheduler is OFF.</value></data>

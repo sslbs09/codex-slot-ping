@@ -99,6 +99,12 @@ public partial class MainWindow : Window
         ModelText.Text = state.Automation.Model;
         ReasoningText.Text = UiText.FormatReasoningEffort(state.Automation.ReasoningEffort);
         SchedulerText.Text = UiText.FormatSchedulerState(state.Scheduler.State);
+        AutomationStatusText.Text = UiText.FormatAutomationControlState(
+            state.Automation.Enabled, state.Automation.IsPaused);
+        AutomationPauseButton.Content = UiText.Get(state.Automation.IsPaused
+            ? "Automation.Resume"
+            : "Automation.Pause");
+        AutomationPauseButton.IsEnabled = state.Automation.Enabled || state.Automation.IsPaused;
         WakeText.Text = UiText.Get(state.Scheduler.EffectiveWakeToRun ? "State.Enabled" : "State.Disabled");
 
         var messages = new List<string>();
@@ -129,7 +135,9 @@ public partial class MainWindow : Window
                 messages.Add(UiText.Get("Scheduler.Conflict"));
                 break;
             case SchedulerViewState.Error:
-                messages.Add(UiText.Get("Scheduler.ReadFailed"));
+                messages.Add(UiText.Get(state.Scheduler.DiagnosticCategory == "scheduler-enabled-while-paused"
+                    ? "Scheduler.PauseDisableFailed"
+                    : "Scheduler.ReadFailed"));
                 break;
         }
 
@@ -140,6 +148,53 @@ public partial class MainWindow : Window
     }
 
     private async void TestNow_Click(object sender, RoutedEventArgs e) => await RunTestNowFromTrayAsync();
+
+    private async void ToggleAutomation_Click(object sender, RoutedEventArgs e) =>
+        await ToggleAutomationAsync(showFailureDialog: false);
+
+    internal Task ToggleAutomationFromTrayAsync() => ToggleAutomationAsync(showFailureDialog: true);
+
+    private async Task ToggleAutomationAsync(bool showFailureDialog)
+    {
+        if (_screenState is null)
+        {
+            return;
+        }
+
+        var wasPaused = _screenState.Automation.IsPaused;
+        try
+        {
+            var operation = wasPaused
+                ? await _controller.ResumeAutomationAsync(CancellationToken.None)
+                : await _controller.PauseAutomationAsync(CancellationToken.None);
+            await RefreshAsync();
+
+            if (operation.Succeeded)
+            {
+                StatusMessageText.Text = UiText.Get(wasPaused
+                    ? "Automation.ResumedMessage"
+                    : "Automation.PausedMessage");
+                return;
+            }
+
+            var message = operation.DiagnosticCategory == "automation-control-save-failed"
+                ? UiText.Get("Automation.ControlSaveFailed")
+                : UiText.Get("Automation.SchedulerSyncFailed");
+            StatusMessageText.Text = $"{message} {UiText.FormatDiagnostic(operation.DiagnosticCategory ?? string.Empty)}";
+            if (showFailureDialog)
+            {
+                ShowTrayMessage(StatusMessageText.Text);
+            }
+        }
+        catch (Exception exception)
+        {
+            StatusMessageText.Text = UiText.Format("Settings.Exception", exception.Message);
+            if (showFailureDialog)
+            {
+                ShowTrayMessage(StatusMessageText.Text);
+            }
+        }
+    }
 
     internal async Task RunTestNowFromTrayAsync()
     {
@@ -237,11 +292,18 @@ public partial class MainWindow : Window
             return;
         }
 
-        var window = new SettingsWindow(_controller, _screenState) { Owner = this };
+        var window = new SettingsWindow(_controller, _screenState, OnSettingsStateChanged) { Owner = this };
         if (window.ShowDialog() == true)
         {
             await RefreshAsync();
         }
+    }
+
+    private void OnSettingsStateChanged(AppScreenState state)
+    {
+        _screenState = state;
+        Render(state);
+        _tray?.UpdateState(state);
     }
 
     internal async void OpenSettingsFromTray()

@@ -66,6 +66,21 @@ public static class UiText
         return Get(key, culture ?? CultureInfo.CurrentUICulture);
     }
 
+    public static string FormatAutomationControlState(
+        bool enabled,
+        bool isPaused,
+        CultureInfo? culture = null)
+    {
+        var key = (enabled, isPaused) switch
+        {
+            (true, false) => "Automation.State.Enabled",
+            (true, true) => "Automation.State.Paused",
+            (false, true) => "Automation.State.DisabledAndPaused",
+            _ => "Automation.State.Disabled"
+        };
+        return Get(key, culture ?? CultureInfo.CurrentUICulture);
+    }
+
     public static string FormatTraySchedulerState(SchedulerViewState state, CultureInfo? culture = null) =>
         string.Format(
             ResolveCulture(culture ?? CultureInfo.CurrentUICulture),

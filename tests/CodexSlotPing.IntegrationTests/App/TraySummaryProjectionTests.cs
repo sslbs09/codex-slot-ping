@@ -55,10 +55,17 @@ public sealed class TraySummaryProjectionTests
     public void Paused_IsIndependentFromDisabledConfiguration()
     {
         var view = TraySummaryProjection.Create(
-            CreateState(enabled: true, paused: true), Chinese);
+            CreateState(
+                enabled: true,
+                paused: true,
+                schedulerState: SchedulerViewState.Disabled,
+                schedulerIsEnabled: false), Chinese);
 
         Assert.Equal(TraySummaryStatus.Paused, view.Status);
         Assert.Equal("自动调度已暂停", view.StatusSummary);
+        Assert.Equal("自动化：已暂停", view.Menu.AutomationControlText);
+        Assert.Equal("恢复自动调度", view.Menu.PauseResumeText);
+        Assert.True(view.Menu.PauseResumeEnabled);
     }
 
     [Fact]
@@ -69,6 +76,39 @@ public sealed class TraySummaryProjectionTests
 
         Assert.Equal(TraySummaryStatus.Disabled, view.Status);
         Assert.Equal("自动调度未启用", view.StatusSummary);
+        Assert.Equal("自动化：未启用", view.Menu.AutomationControlText);
+        Assert.False(view.Menu.PauseResumeEnabled);
+    }
+
+    [Fact]
+    public void DisabledAndPausedFlagsRemainVisibleIndependently()
+    {
+        var view = TraySummaryProjection.Create(
+            CreateState(
+                enabled: false,
+                paused: true,
+                schedulerState: SchedulerViewState.Disabled,
+                schedulerIsEnabled: false),
+            Chinese);
+
+        Assert.Equal(TraySummaryStatus.Paused, view.Status);
+        Assert.Equal("自动化：未启用 · 保留暂停状态", view.Menu.AutomationControlText);
+        Assert.Equal("恢复自动调度", view.Menu.PauseResumeText);
+        Assert.True(view.Menu.PauseResumeEnabled);
+    }
+
+    [Fact]
+    public void PausedAutomationWithDisabledScheduler_IsNotReportedAsSchedulerError()
+    {
+        var view = TraySummaryProjection.Create(
+            CreateState(
+                enabled: true,
+                paused: true,
+                schedulerState: SchedulerViewState.Disabled,
+                schedulerIsEnabled: false),
+            Chinese);
+
+        Assert.Equal(TraySummaryStatus.Paused, view.Status);
     }
 
     [Fact]
@@ -112,6 +152,9 @@ public sealed class TraySummaryProjectionTests
         var view = TraySummaryProjection.Create(state, Chinese);
 
         Assert.Equal("计划任务：已启用", view.Menu.SchedulerText);
+        Assert.Equal("自动化：已启用", view.Menu.AutomationControlText);
+        Assert.Equal("暂停自动调度", view.Menu.PauseResumeText);
+        Assert.True(view.Menu.PauseResumeEnabled);
         Assert.False(view.Menu.WakeToRunChecked);
     }
 

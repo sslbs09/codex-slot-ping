@@ -48,6 +48,54 @@ public sealed class FormalSlotClaimServiceTests
     }
 
     [Fact]
+    public async Task PausedAutomation_BlocksScheduledClaimsButAllowsConfirmedTestNow()
+    {
+        var now = AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(13, 37, 12));
+        var fixture = CreateFixture(now, config: AppConfigDefaults.Create() with
+        {
+            TimeZone = EasternTimeZoneId,
+            Enabled = true,
+            IsPaused = true
+        });
+        var originalState = fixture.StateStore.State;
+
+        var scheduledAttempt = await fixture.Service.TryClaimScheduledAttemptAsync(CancellationToken.None);
+        var legacyScheduledAttempt = await fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None);
+        Assert.Equal(originalState, fixture.StateStore.State);
+        var unconfirmedTestNow = await fixture.Service.TryClaimTestNowAsync(
+            "paused-test-now-unconfirmed",
+            userConfirmed: false,
+            CancellationToken.None);
+        var testNow = await fixture.Service.TryClaimTestNowAsync(
+            "paused-test-now",
+            userConfirmed: true,
+            CancellationToken.None);
+
+        Assert.Equal(SlotClaimKind.Blocked, scheduledAttempt.Kind);
+        Assert.Equal(SlotClaimBlockReason.AutomationPaused, scheduledAttempt.BlockReason);
+        Assert.Equal(SlotClaimKind.Blocked, legacyScheduledAttempt.Kind);
+        Assert.Equal(SlotClaimBlockReason.AutomationPaused, legacyScheduledAttempt.BlockReason);
+        Assert.Equal(TestNowClaimKind.NotEligible, unconfirmedTestNow.Kind);
+        Assert.Equal(EligibilityReason.TestNowConfirmationRequired, unconfirmedTestNow.EligibilityDecision!.Reason);
+        Assert.True(testNow.IsClaimed);
+        Assert.Equal("paused-test-now", fixture.StateStore.State.ActiveTestNowClaim!.TestId);
+    }
+
+    [Fact]
+    public async Task SetAutomationPausedAsync_PersistsIntentUnderClaimMutex()
+    {
+        var fixture = CreateFixture(AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(13, 37, 12)));
+
+        var saved = await fixture.Service.SetAutomationPausedAsync(true, CancellationToken.None);
+
+        Assert.True(saved);
+        Assert.True(fixture.ConfigStore.Config.Enabled);
+        Assert.True(fixture.ConfigStore.Config.IsPaused);
+        Assert.True(fixture.ConfigStore.SaveObservedMutexHeld);
+        Assert.False(fixture.Mutex.IsHeld);
+    }
+
+    [Fact]
     public async Task ConcurrentScheduledAttemptClaims_HaveOneWinner()
     {
         var fixture = CreateFixture(AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(13, 37, 12)));
@@ -212,7 +260,12 @@ public sealed class FormalSlotClaimServiceTests
     [Fact]
     public async Task DisabledConfig_BlocksWithoutReadingClockOrWritingState()
     {
-        var config = AppConfigDefaults.Create() with { Enabled = false, TimeZone = EasternTimeZoneId };
+        var config = AppConfigDefaults.Create() with
+        {
+            Enabled = false,
+            IsPaused = true,
+            TimeZone = EasternTimeZoneId
+        };
         var fixture = CreateFixture(AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(7, 1)), config);
 
         var result = await fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None);
@@ -437,8 +490,10 @@ public sealed class FormalSlotClaimServiceTests
     {
         var clock = new FixedClock(nowUtc);
         var zoneProvider = new FixedTimeZoneProvider(EasternTimeZoneId, EasternTimeZone);
-        var configStore = new InMemoryConfigStore(config ?? AppConfigDefaults.Create() with { TimeZone = EasternTimeZoneId });
         var mutex = new RecordingStateMutex(mutexAvailable);
+        var configStore = new InMemoryConfigStore(
+            config ?? AppConfigDefaults.Create() with { TimeZone = EasternTimeZoneId },
+            () => mutex.IsHeld);
         var stateStore = new InMemoryStateStore(state ?? KnownState(), () => mutex.IsHeld);
         var service = new FormalSlotClaimService(
             clock,
@@ -498,9 +553,11 @@ public sealed class FormalSlotClaimServiceTests
                 : throw new TimeZoneNotFoundException(windowsTimeZoneId);
     }
 
-    private sealed class InMemoryConfigStore(AppConfig config) : IConfigStore
+    private sealed class InMemoryConfigStore(AppConfig config, Func<bool> isMutexHeld) : IConfigStore
     {
         public AppConfig Config { get; set; } = config;
+
+        public bool SaveObservedMutexHeld { get; private set; }
 
         public int LoadCount { get; private set; }
 
@@ -512,6 +569,7 @@ public sealed class FormalSlotClaimServiceTests
 
         public Task SaveAsync(AppConfig config, CancellationToken cancellationToken)
         {
+            SaveObservedMutexHeld |= isMutexHeld();
             Config = config;
             return Task.CompletedTask;
         }

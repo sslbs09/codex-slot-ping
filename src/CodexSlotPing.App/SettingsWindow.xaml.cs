@@ -9,11 +9,16 @@ public partial class SettingsWindow : Window
     private AppScreenState _screenState;
     private bool _initializing = true;
     private readonly AppController _controller;
+    private readonly Action<AppScreenState>? _stateChanged;
 
-    public SettingsWindow(AppController controller, AppScreenState screenState)
+    public SettingsWindow(
+        AppController controller,
+        AppScreenState screenState,
+        Action<AppScreenState>? stateChanged = null)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _screenState = screenState ?? throw new ArgumentNullException(nameof(screenState));
+        _stateChanged = stateChanged;
         InitializeComponent();
         InitializeFields();
     }
@@ -58,6 +63,8 @@ public partial class SettingsWindow : Window
         TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerViewState.TimezoneChanged
             ? Visibility.Visible
             : Visibility.Collapsed;
+        RenderAutomationControl();
+        RenderSchedulerState();
         _initializing = false;
     }
 
@@ -105,7 +112,9 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        await RunSchedulerOperationAsync(_controller.InstallOrUpdateSchedulerAsync, "Settings.InstallSuccess");
+        await RunSchedulerOperationAsync(
+            _controller.InstallOrUpdateSchedulerAsync,
+            _screenState.Automation.IsPaused ? "Settings.InstallPausedSuccess" : "Settings.InstallSuccess");
     }
 
     private async void Disable_Click(object sender, RoutedEventArgs e)
@@ -128,6 +137,25 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private async void AutomationPause_Click(object sender, RoutedEventArgs e)
+    {
+        var wasPaused = _screenState.Automation.IsPaused;
+        try
+        {
+            var result = wasPaused
+                ? await _controller.ResumeAutomationAsync(CancellationToken.None)
+                : await _controller.PauseAutomationAsync(CancellationToken.None);
+            SetScreenState(await _controller.RefreshAsync(CancellationToken.None));
+            StatusText.Text = result.Succeeded
+                ? UiText.Get(wasPaused ? "Automation.ResumedMessage" : "Automation.PausedMessage")
+                : UiText.FormatDiagnostic(result.DiagnosticCategory ?? "automation-control-save-failed");
+        }
+        catch (Exception exception)
+        {
+            StatusText.Text = UiText.Format("Settings.Exception", exception.Message);
+        }
+    }
+
     private async Task RunSchedulerOperationAsync(
         Func<CancellationToken, Task<SchedulerOperationView>> operation,
         string successMessageKey)
@@ -139,6 +167,7 @@ public partial class SettingsWindow : Window
                 ? UiText.Get(successMessageKey)
                 : UiText.FormatDiagnostic(result.DiagnosticCategory ?? UiText.Get("Settings.OperationFailed"));
             _screenState = await _controller.RefreshAsync(CancellationToken.None);
+            SetScreenState(_screenState);
             EligibilityDetailsText.Text = _screenState.Eligibility.Details;
             TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerViewState.TimezoneChanged
                 ? Visibility.Visible
@@ -173,6 +202,7 @@ public partial class SettingsWindow : Window
             }
 
             _screenState = await _controller.RefreshAsync(CancellationToken.None);
+            SetScreenState(_screenState);
             TimeZoneCombo.Items.Clear();
             AddTimeZoneOption("SYSTEM");
             if (!TimeZoneCombo.Items.Cast<LocalizedOption>().Any(option =>
@@ -221,6 +251,32 @@ public partial class SettingsWindow : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void RenderAutomationControl()
+    {
+        AutomationStatusText.Text = UiText.FormatAutomationControlState(
+            _screenState.Automation.Enabled, _screenState.Automation.IsPaused);
+        AutomationPauseButton.Content = UiText.Get(_screenState.Automation.IsPaused
+            ? "Automation.Resume"
+            : "Automation.Pause");
+        AutomationPauseButton.IsEnabled = _screenState.Automation.Enabled || _screenState.Automation.IsPaused;
+    }
+
+    private void RenderSchedulerState()
+    {
+        SchedulerStatusText.Text = _screenState.Scheduler.DiagnosticCategory == "scheduler-enabled-while-paused"
+            ? UiText.Get("Scheduler.PauseDisableFailed")
+            : UiText.FormatSchedulerState(_screenState.Scheduler.State);
+    }
+
+    private void SetScreenState(AppScreenState state)
+    {
+        _screenState = state;
+        EligibilityDetailsText.Text = state.Eligibility.Details;
+        RenderAutomationControl();
+        RenderSchedulerState();
+        _stateChanged?.Invoke(state);
+    }
 
     private sealed record LocalizedOption(string Value, string Display);
 }

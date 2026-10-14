@@ -75,7 +75,7 @@ public sealed class TimezoneUpdateService
             currentWindowsTimeZoneId,
             plan,
             config.WakeToRun,
-            Enabled: currentStatus.IsEnabled);
+            Enabled: currentStatus.IsEnabled && !config.IsPaused);
 
         SchedulerOperationResult schedulerUpdate;
         try

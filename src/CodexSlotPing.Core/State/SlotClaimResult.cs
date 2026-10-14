@@ -16,6 +16,7 @@ public enum SlotClaimBlockReason
 {
     MutexUnavailable,
     ConfigurationDisabled,
+    AutomationPaused,
     InvalidConfigOrState,
     ClockRollback,
     TimeZoneMismatch,

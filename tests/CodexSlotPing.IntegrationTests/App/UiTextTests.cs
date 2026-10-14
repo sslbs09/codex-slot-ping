@@ -173,7 +173,8 @@ public sealed class UiTextTests
         {
             CultureInfo.CurrentUICulture = Chinese;
             Assert.Equal(
-                ["打开", "立即测试", "自动化状态", "计划任务", "唤醒电脑", "设置", "打开日志", "退出"],
+                ["打开", "立即测试", "自动化状态", "自动化控制状态", "计划任务", "唤醒电脑",
+                    "暂停自动调度", "设置", "打开日志", "退出"],
                 TrayIconController.MenuEntryNames);
         }
         finally

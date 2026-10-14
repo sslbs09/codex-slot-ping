@@ -22,6 +22,7 @@
   <data name="Main.Model" xml:space="preserve"><value>模型</value></data>
   <data name="Main.Reasoning" xml:space="preserve"><value>推理强度</value></data>
   <data name="Main.Scheduler" xml:space="preserve"><value>计划任务</value></data>
+  <data name="Main.AutomationControl" xml:space="preserve"><value>自动化控制</value></data>
   <data name="Main.WakeComputer" xml:space="preserve"><value>唤醒电脑</value></data>
   <data name="Main.CopyInstructions" xml:space="preserve"><value>复制安装说明</value></data>
   <data name="Main.TimezoneAction" xml:space="preserve"><value>使用当前时区并更新计划任务</value></data>
@@ -52,6 +53,7 @@
   <data name="Scheduler.TimezoneChanged" xml:space="preserve"><value>Windows 时区已变化，需要更新计划任务。已配置：{0}；当前：{1}。</value></data>
   <data name="Scheduler.Conflict" xml:space="preserve"><value>发现同名任务，但它不属于本应用；已保留原样。</value></data>
   <data name="Scheduler.ReadFailed" xml:space="preserve"><value>无法确认 Windows 计划任务的状态。</value></data>
+  <data name="Scheduler.PauseDisableFailed" xml:space="preserve"><value>自动调度已暂停，但计划任务仍处于启用状态。</value></data>
   <data name="Diagnostic.CodexNotFound" xml:space="preserve"><value>未找到 Codex CLI，或其本机可执行文件缺失。</value></data>
   <data name="Diagnostic.CliVersionUnknown" xml:space="preserve"><value>无法确认 Codex CLI 版本。</value></data>
   <data name="Diagnostic.LoginUnknown" xml:space="preserve"><value>无法确认 ChatGPT 登录状态。</value></data>
@@ -130,10 +132,22 @@
   <data name="Tray.Status.Waiting" xml:space="preserve"><value>等待下一次计划检查 · {0}</value></data>
   <data name="Tray.Status.Ready" xml:space="preserve"><value>当前条件满足 · 等待计划唤醒</value></data>
   <data name="Tray.SchedulerLabel" xml:space="preserve"><value>计划任务</value></data>
+  <data name="Tray.AutomationControl" xml:space="preserve"><value>自动化：{0}</value></data>
+  <data name="Tray.AutomationControlLabel" xml:space="preserve"><value>自动化控制状态</value></data>
   <data name="Tray.SchedulerState" xml:space="preserve"><value>计划任务：{0}</value></data>
   <data name="Tray.WakeComputer" xml:space="preserve"><value>唤醒电脑</value></data>
   <data name="Tray.OpenLogs" xml:space="preserve"><value>打开日志</value></data>
   <data name="Tray.Exit" xml:space="preserve"><value>退出</value></data>
+  <data name="Automation.State.Enabled" xml:space="preserve"><value>已启用</value></data>
+  <data name="Automation.State.Paused" xml:space="preserve"><value>已暂停</value></data>
+  <data name="Automation.State.Disabled" xml:space="preserve"><value>未启用</value></data>
+  <data name="Automation.State.DisabledAndPaused" xml:space="preserve"><value>未启用 · 保留暂停状态</value></data>
+  <data name="Automation.Pause" xml:space="preserve"><value>暂停自动调度</value></data>
+  <data name="Automation.Resume" xml:space="preserve"><value>恢复自动调度</value></data>
+  <data name="Automation.PausedMessage" xml:space="preserve"><value>自动调度已暂停；仍可在确认后使用立即测试。</value></data>
+  <data name="Automation.ResumedMessage" xml:space="preserve"><value>自动调度已恢复，并生成了新计划。</value></data>
+  <data name="Automation.ControlSaveFailed" xml:space="preserve"><value>无法保存自动化控制状态。</value></data>
+  <data name="Automation.SchedulerSyncFailed" xml:space="preserve"><value>自动化控制状态已保存，但计划任务未能同步。</value></data>
   <data name="Settings.WindowTitle" xml:space="preserve"><value>Codex Slot Ping 设置</value></data>
   <data name="Settings.Header" xml:space="preserve"><value>设置</value></data>
   <data name="Settings.SectionTitle" xml:space="preserve"><value>调度与请求</value></data>
@@ -158,6 +172,7 @@
   <data name="Settings.InstallConfirmTitle" xml:space="preserve"><value>确认安装计划任务</value></data>
   <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>这会创建或更新本应用拥有的 Windows 计划任务。本地策略允许尝试时，任务会唤醒 Runner；Runner 会再次检查 eligibility，然后才向 Codex 发送已配置的提示词。是否继续？</value></data>
   <data name="Settings.InstallSuccess" xml:space="preserve"><value>计划任务已安装，回读状态为已启用。</value></data>
+  <data name="Settings.InstallPausedSuccess" xml:space="preserve"><value>计划任务计划已更新；自动调度仍处于暂停状态，任务保持关闭。</value></data>
   <data name="Settings.DisableConfirmTitle" xml:space="preserve"><value>禁用计划任务</value></data>
   <data name="Settings.DisableConfirmBody" xml:space="preserve"><value>要禁用本应用拥有的 Codex Slot Ping 计划任务吗？</value></data>
   <data name="Settings.DisableSuccess" xml:space="preserve"><value>计划任务已关闭。</value></data>

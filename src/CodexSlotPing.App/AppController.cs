@@ -39,6 +39,7 @@ public sealed class AppController
     private readonly SchedulingCoordinator _schedulingCoordinator;
     private readonly SchedulerHealthEvaluator _schedulerHealthEvaluator = new();
     private readonly TimezoneUpdateService _timezoneUpdateService;
+    private readonly SemaphoreSlim _automationOperationGate = new(1, 1);
     private int _testNowActive;
 
     public AppController(
@@ -105,7 +106,10 @@ public sealed class AppController
             paths.LogsDirectory);
     }
 
-    public async Task<AppScreenState> RefreshAsync(CancellationToken cancellationToken)
+    public Task<AppScreenState> RefreshAsync(CancellationToken cancellationToken) =>
+        ExecuteAutomationOperationAsync(() => RefreshCoreAsync(cancellationToken), cancellationToken);
+
+    private async Task<AppScreenState> RefreshCoreAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
@@ -151,7 +155,13 @@ public sealed class AppController
         return await SaveSettingsCoreAsync(config, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<ConfigSaveResult> SaveSettingsCoreAsync(AppConfig candidate, CancellationToken cancellationToken)
+    private Task<ConfigSaveResult> SaveSettingsCoreAsync(AppConfig candidate, CancellationToken cancellationToken) =>
+        ExecuteAutomationOperationAsync(
+            () => SaveSettingsCoreUnlockedAsync(candidate, cancellationToken), cancellationToken);
+
+    private async Task<ConfigSaveResult> SaveSettingsCoreUnlockedAsync(
+        AppConfig candidate,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(candidate);
         cancellationToken.ThrowIfCancellationRequested();
@@ -164,7 +174,8 @@ public sealed class AppController
             return new ConfigSaveResult(false, validation.Errors, null, false);
         }
 
-        var savedConfig = validation.NormalizedConfig;
+        var currentControl = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
+        var savedConfig = validation.NormalizedConfig with { IsPaused = currentControl.IsPaused };
         SchedulerStatus status;
         try
         {
@@ -192,7 +203,7 @@ public sealed class AppController
                 AppStatusProjection.ProjectScheduler(status, candidate.WakeToRun), false);
         }
 
-        var configToSave = status.Exists && status.IsOwned
+        var configToSave = status.Exists && status.IsOwned && !savedConfig.IsPaused
             ? savedConfig with { Enabled = status.IsEnabled }
             : savedConfig;
         try
@@ -216,7 +227,10 @@ public sealed class AppController
         }
 
         var scheduling = await _schedulingCoordinator.EvaluateAsync(cancellationToken).ConfigureAwait(false);
-        var definition = CreateDefinition(configToSave, enabled: status.IsEnabled, scheduling.Plan);
+        var definition = CreateDefinition(
+            configToSave,
+            enabled: status.IsEnabled && !configToSave.IsPaused,
+            scheduling.Plan);
         SchedulerOperationResult update;
         try
         {
@@ -257,7 +271,11 @@ public sealed class AppController
             AppStatusProjection.ProjectScheduler(verified, configToSave.WakeToRun), true);
     }
 
-    public async Task<SchedulerOperationView> InstallOrUpdateSchedulerAsync(CancellationToken cancellationToken)
+    public Task<SchedulerOperationView> InstallOrUpdateSchedulerAsync(CancellationToken cancellationToken) =>
+        ExecuteAutomationOperationAsync(
+            () => InstallOrUpdateSchedulerCoreAsync(cancellationToken), cancellationToken);
+
+    private async Task<SchedulerOperationView> InstallOrUpdateSchedulerCoreAsync(CancellationToken cancellationToken)
     {
         var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
         var environment = await _environmentDetector.DetectAsync(cancellationToken).ConfigureAwait(false);
@@ -281,7 +299,8 @@ public sealed class AppController
 
         var installConfig = validation.NormalizedConfig with { Enabled = true };
         var scheduling = await _schedulingCoordinator.EvaluateAsync(cancellationToken).ConfigureAwait(false);
-        var definition = CreateDefinition(installConfig, enabled: true, scheduling.Plan);
+        var shouldEnableScheduler = !installConfig.IsPaused;
+        var definition = CreateDefinition(installConfig, shouldEnableScheduler, scheduling.Plan);
         SchedulerOperationResult operation;
         try
         {
@@ -305,12 +324,283 @@ public sealed class AppController
         await _configStore.SaveAsync(installConfig, cancellationToken).ConfigureAwait(false);
         var readback = await ReadHealthySchedulerAsync(
             installConfig, currentTimeZoneId, cancellationToken, definition.SchedulePlan).ConfigureAwait(false);
-        return readback.State == SchedulerState.ON
+        return readback.State == (shouldEnableScheduler ? SchedulerState.ON : SchedulerState.OFF)
             ? new SchedulerOperationView(true, null)
             : new SchedulerOperationView(false, readback.DiagnosticCategory ?? "scheduler-readback-failed");
     }
 
-    public async Task<SchedulerOperationView> DisableSchedulerAsync(CancellationToken cancellationToken)
+    public Task<SchedulerOperationView> PauseAutomationAsync(CancellationToken cancellationToken) =>
+        ExecuteAutomationOperationAsync(() => PauseAutomationCoreAsync(cancellationToken), cancellationToken);
+
+    private async Task<SchedulerOperationView> PauseAutomationCoreAsync(CancellationToken cancellationToken)
+    {
+        // Persist through Core's claim mutex before touching Task Scheduler. A trigger
+        // that races with the scheduler update will then be rejected by the Core gate.
+        if (!await _claimService.SetAutomationPausedAsync(true, cancellationToken).ConfigureAwait(false))
+        {
+            return new SchedulerOperationView(false, "automation-control-save-failed");
+        }
+
+        var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
+        SchedulerStatus status;
+        try
+        {
+            status = await _schedulerGateway.ReadStatusAsync(
+                SchedulerTaskContract.ProductionTaskPath,
+                _runnerPath,
+                config.TimeZone,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return new SchedulerOperationView(false, "scheduler-unavailable");
+        }
+
+        if (!status.Exists || !status.IsEnabled)
+        {
+            return status.State == SchedulerState.ERROR
+                ? new SchedulerOperationView(false, status.DiagnosticCategory ?? "scheduler-unavailable")
+                : new SchedulerOperationView(true, null);
+        }
+
+        if (!status.IsOwned)
+        {
+            return new SchedulerOperationView(false, "task-ownership-conflict");
+        }
+
+        SchedulerOperationResult operation;
+        try
+        {
+            operation = await _schedulerGateway.DisableAsync(
+                SchedulerTaskContract.ProductionTaskPath, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return new SchedulerOperationView(false, "scheduler-unavailable");
+        }
+
+        if (!operation.Succeeded)
+        {
+            return ProjectSchedulerOperation(operation);
+        }
+
+        try
+        {
+            var readback = await _schedulerGateway.ReadStatusAsync(
+                SchedulerTaskContract.ProductionTaskPath,
+                _runnerPath,
+                config.TimeZone,
+                cancellationToken).ConfigureAwait(false);
+            return readback.State != SchedulerState.ERROR && !readback.IsEnabled
+                ? new SchedulerOperationView(true, null)
+                : new SchedulerOperationView(false, readback.DiagnosticCategory ?? "scheduler-readback-failed");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return new SchedulerOperationView(false, "scheduler-readback-failed");
+        }
+    }
+
+    public Task<SchedulerOperationView> ResumeAutomationAsync(CancellationToken cancellationToken) =>
+        ExecuteAutomationOperationAsync(() => ResumeAutomationCoreAsync(cancellationToken), cancellationToken);
+
+    private async Task<SchedulerOperationView> ResumeAutomationCoreAsync(CancellationToken cancellationToken)
+    {
+        var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
+        if (!config.IsPaused)
+        {
+            return new SchedulerOperationView(true, null);
+        }
+
+        // Re-evaluate current facts for every Resume. The old one-shot trigger is never reused.
+        var scheduling = await _schedulingCoordinator.EvaluateAsync(cancellationToken).ConfigureAwait(false);
+        if (!config.Enabled)
+        {
+            SchedulerStatus disabledStatus;
+            try
+            {
+                disabledStatus = await _schedulerGateway.ReadStatusAsync(
+                    SchedulerTaskContract.ProductionTaskPath,
+                    _runnerPath,
+                    config.TimeZone,
+                    cancellationToken).ConfigureAwait(false);
+                if (disabledStatus.Exists && disabledStatus.IsEnabled)
+                {
+                    if (!disabledStatus.IsOwned)
+                    {
+                        return new SchedulerOperationView(false, "task-ownership-conflict");
+                    }
+
+                    var disable = await _schedulerGateway.DisableAsync(
+                        SchedulerTaskContract.ProductionTaskPath, cancellationToken).ConfigureAwait(false);
+                    if (!disable.Succeeded)
+                    {
+                        return ProjectSchedulerOperation(disable);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                return new SchedulerOperationView(false, "scheduler-unavailable");
+            }
+
+            return await _claimService.SetAutomationPausedAsync(false, cancellationToken).ConfigureAwait(false)
+                ? new SchedulerOperationView(true, null)
+                : new SchedulerOperationView(false, "automation-control-save-failed");
+        }
+
+        var environment = await _environmentDetector.DetectAsync(cancellationToken).ConfigureAwait(false);
+        var currentTimeZoneId = _timeZoneProvider.CurrentWindowsTimeZoneId;
+        var validation = ConfigValidator.Validate(config, currentTimeZoneId, environment.SupportedReasoningEfforts);
+        if (!validation.IsValid || validation.NormalizedConfig is null)
+        {
+            return new SchedulerOperationView(false, "invalid-configuration");
+        }
+
+        if (!environment.IsReady)
+        {
+            return new SchedulerOperationView(false,
+                environment.DiagnosticCodes.FirstOrDefault() ?? "cli-environment-not-ready");
+        }
+
+        SchedulerStatus existing;
+        try
+        {
+            existing = await _schedulerGateway.ReadStatusAsync(
+                SchedulerTaskContract.ProductionTaskPath,
+                _runnerPath,
+                config.TimeZone,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return new SchedulerOperationView(false, "scheduler-unavailable");
+        }
+
+        if (existing.Exists && !existing.IsOwned)
+        {
+            return new SchedulerOperationView(false, "task-ownership-conflict");
+        }
+
+        var definition = CreateDefinition(validation.NormalizedConfig, enabled: false, scheduling.Plan);
+        SchedulerOperationResult update;
+        try
+        {
+            update = await _schedulerGateway.InstallOrUpdateAsync(definition, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return new SchedulerOperationView(false, "scheduler-unavailable");
+        }
+
+        if (!update.Succeeded)
+        {
+            return ProjectSchedulerOperation(update);
+        }
+
+        var verified = await ReadHealthySchedulerAsync(
+            validation.NormalizedConfig,
+            currentTimeZoneId,
+            cancellationToken,
+            definition.SchedulePlan).ConfigureAwait(false);
+        if (verified.State != SchedulerState.OFF)
+        {
+            return new SchedulerOperationView(false, verified.DiagnosticCategory ?? "scheduler-readback-failed");
+        }
+
+        if (!await _claimService.SetAutomationPausedAsync(false, cancellationToken).ConfigureAwait(false))
+        {
+            return new SchedulerOperationView(false, "automation-control-save-failed");
+        }
+
+        var enabledDefinition = CreateDefinition(validation.NormalizedConfig, enabled: true, scheduling.Plan);
+        try
+        {
+            var enable = await _schedulerGateway.InstallOrUpdateAsync(enabledDefinition, cancellationToken)
+                .ConfigureAwait(false);
+            if (!enable.Succeeded)
+            {
+                var pauseRestored = await RestorePauseAndDisableSchedulerAsync(cancellationToken).ConfigureAwait(false);
+                return new SchedulerOperationView(
+                    false,
+                    pauseRestored ? enable.DiagnosticCategory ?? "scheduler-update-failed" : "automation-control-save-failed");
+            }
+
+            var enabledReadback = await ReadHealthySchedulerAsync(
+                validation.NormalizedConfig,
+                currentTimeZoneId,
+                cancellationToken,
+                enabledDefinition.SchedulePlan).ConfigureAwait(false);
+            if (enabledReadback.State == SchedulerState.ON)
+            {
+                return new SchedulerOperationView(true, null);
+            }
+
+            var readbackPauseRestored = await RestorePauseAndDisableSchedulerAsync(cancellationToken).ConfigureAwait(false);
+            return new SchedulerOperationView(
+                false,
+                readbackPauseRestored
+                    ? enabledReadback.DiagnosticCategory ?? "scheduler-readback-failed"
+                    : "automation-control-save-failed");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            var pauseRestored = await RestorePauseAndDisableSchedulerAsync(cancellationToken).ConfigureAwait(false);
+            return new SchedulerOperationView(
+                false,
+                pauseRestored ? "scheduler-unavailable" : "automation-control-save-failed");
+        }
+    }
+
+    private async Task<bool> RestorePauseAndDisableSchedulerAsync(CancellationToken cancellationToken)
+    {
+        var pauseSaved = await _claimService.SetAutomationPausedAsync(true, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _schedulerGateway.DisableAsync(
+                SchedulerTaskContract.ProductionTaskPath, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Return the persisted gate result below; scheduler cleanup remains best effort.
+        }
+
+        return pauseSaved;
+    }
+
+    public Task<SchedulerOperationView> DisableSchedulerAsync(CancellationToken cancellationToken) =>
+        ExecuteAutomationOperationAsync(() => DisableSchedulerCoreAsync(cancellationToken), cancellationToken);
+
+    private async Task<SchedulerOperationView> DisableSchedulerCoreAsync(CancellationToken cancellationToken)
     {
         var operation = await _schedulerGateway.DisableAsync(
             SchedulerTaskContract.ProductionTaskPath, cancellationToken).ConfigureAwait(false);
@@ -328,7 +618,10 @@ public sealed class AppController
             : new SchedulerOperationView(false, readback.DiagnosticCategory ?? "scheduler-readback-failed");
     }
 
-    public async Task<SchedulerOperationView> RemoveSchedulerAsync(CancellationToken cancellationToken)
+    public Task<SchedulerOperationView> RemoveSchedulerAsync(CancellationToken cancellationToken) =>
+        ExecuteAutomationOperationAsync(() => RemoveSchedulerCoreAsync(cancellationToken), cancellationToken);
+
+    private async Task<SchedulerOperationView> RemoveSchedulerCoreAsync(CancellationToken cancellationToken)
     {
         var operation = await _schedulerGateway.RemoveAsync(
             SchedulerTaskContract.ProductionTaskPath, cancellationToken).ConfigureAwait(false);
@@ -384,7 +677,13 @@ public sealed class AppController
         }
     }
 
-    public async Task<TimezoneUpdateView> ApplyCurrentTimeZoneChangeAsync(
+    public Task<TimezoneUpdateView> ApplyCurrentTimeZoneChangeAsync(
+        bool userConfirmed,
+        CancellationToken cancellationToken) =>
+        ExecuteAutomationOperationAsync(
+            () => ApplyCurrentTimeZoneChangeCoreAsync(userConfirmed, cancellationToken), cancellationToken);
+
+    private async Task<TimezoneUpdateView> ApplyCurrentTimeZoneChangeCoreAsync(
         bool userConfirmed,
         CancellationToken cancellationToken)
     {
@@ -425,6 +724,21 @@ public sealed class AppController
             .ConfigureAwait(false);
         return ProjectTimezoneUpdate(new TimezoneUpdateResult(
             TimezoneUpdateState.UPDATED, updatedConfig, updatedStatus, null, true));
+    }
+
+    private async Task<T> ExecuteAutomationOperationAsync<T>(
+        Func<Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
+        await _automationOperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await operation().ConfigureAwait(false);
+        }
+        finally
+        {
+            _automationOperationGate.Release();
+        }
     }
 
     private static SchedulerOperationView ProjectSchedulerOperation(SchedulerOperationResult result) =>
@@ -477,6 +791,47 @@ public sealed class AppController
             "trigger-plan-mismatch",
             "trigger-contract-mismatch",
             "start-when-available-disabled"];
+        if (config.IsPaused && status.Exists && status.IsOwned && status.IsEnabled)
+        {
+            try
+            {
+                var disable = await _schedulerGateway.DisableAsync(
+                    SchedulerTaskContract.ProductionTaskPath, cancellationToken).ConfigureAwait(false);
+                if (!disable.Succeeded)
+                {
+                    return disable.Status ?? status with
+                    {
+                        State = SchedulerState.ERROR,
+                        DiagnosticCategory = disable.DiagnosticCategory ?? "scheduler-disable-failed"
+                    };
+                }
+
+                var disabledRaw = await _schedulerGateway.ReadStatusAsync(
+                    SchedulerTaskContract.ProductionTaskPath,
+                    _runnerPath,
+                    config.TimeZone,
+                    cancellationToken).ConfigureAwait(false);
+                status = _schedulerHealthEvaluator.Evaluate(
+                    disabledRaw, _runnerPath, config.TimeZone, currentWindowsTimeZoneId, plan);
+                if (status.IsEnabled)
+                {
+                    return status with
+                    {
+                        State = SchedulerState.ERROR,
+                        DiagnosticCategory = status.DiagnosticCategory ?? "scheduler-disable-unverified"
+                    };
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                return status with { State = SchedulerState.ERROR, DiagnosticCategory = "scheduler-disable-failed" };
+            }
+        }
+
         if (!status.Exists || !status.IsOwned || status.ContractMismatches.Count == 0 ||
             status.ContractMismatches.Any(code => !scheduleMismatchCodes.Contains(code, StringComparer.Ordinal)))
         {
@@ -486,7 +841,7 @@ public sealed class AppController
         try
         {
             var update = await _schedulerGateway.InstallOrUpdateAsync(
-                CreateDefinition(config, status.IsEnabled, plan), cancellationToken).ConfigureAwait(false);
+                CreateDefinition(config, status.IsEnabled && !config.IsPaused, plan), cancellationToken).ConfigureAwait(false);
             if (!update.Succeeded)
             {
                 return update.Status ?? status with
