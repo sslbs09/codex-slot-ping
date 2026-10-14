@@ -172,6 +172,21 @@
   <data name="Settings.RemoveScheduler" xml:space="preserve"><value>Remove scheduler</value></data>
   <data name="Settings.Close" xml:space="preserve"><value>Close</value></data>
   <data name="Settings.SchedulerWarning" xml:space="preserve"><value>Windows Scheduler only wakes Runner at one planned time. Runner rechecks Core eligibility before any Codex request.</value></data>
+  <data name="Settings.UpdateSectionTitle" xml:space="preserve"><value>Application updates</value></data>
+  <data name="Settings.CheckForUpdates" xml:space="preserve"><value>Check for updates</value></data>
+  <data name="Update.Unknown" xml:space="preserve"><value>Not checked yet.</value></data>
+  <data name="Update.Checking" xml:space="preserve"><value>Checking GitHub Releases…</value></data>
+  <data name="Update.UpToDate" xml:space="preserve"><value>You are using version {0}; no newer stable release is available.</value></data>
+  <data name="Update.Available" xml:space="preserve"><value>Version {0} is available.</value></data>
+  <data name="Update.Failed" xml:space="preserve"><value>Update check failed ({0}).</value></data>
+  <data name="Update.Error.Network" xml:space="preserve"><value>network unavailable</value></data>
+  <data name="Update.Error.Timeout" xml:space="preserve"><value>request timed out</value></data>
+  <data name="Update.Error.Api" xml:space="preserve"><value>GitHub API error</value></data>
+  <data name="Update.Error.RateLimited" xml:space="preserve"><value>GitHub rate limit reached</value></data>
+  <data name="Update.Error.MalformedResponse" xml:space="preserve"><value>invalid GitHub response</value></data>
+  <data name="Update.Error.NoStableRelease" xml:space="preserve"><value>no valid stable release found</value></data>
+  <data name="Update.Error.InvalidAssetContract" xml:space="preserve"><value>release package metadata is invalid</value></data>
+  <data name="Update.Error.InvalidCurrentVersion" xml:space="preserve"><value>application version is invalid</value></data>
   <data name="Settings.Saved" xml:space="preserve"><value>Settings saved.</value></data>
   <data name="Settings.InstallConfirmTitle" xml:space="preserve"><value>Confirm scheduler installation</value></data>
   <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>This creates or updates the owned Windows task. When local policy allows an attempt, it wakes Runner, which rechecks eligibility before sending your configured prompt to Codex. Continue?</value></data>

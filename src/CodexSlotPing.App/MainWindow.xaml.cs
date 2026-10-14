@@ -15,24 +15,31 @@ namespace CodexSlotPing.App;
 public partial class MainWindow : Window
 {
     private readonly AppController _controller;
+    private readonly AppUpdateController _updateController;
     private UiPreferencesStore? _preferencesStore;
     private TrayIconController? _tray;
     private AppScreenState? _screenState;
     private bool _exitRequested;
     private bool _testNowRunning;
 
-    public MainWindow() : this(AppController.CreateDefault(), new UiPreferencesStore())
+    public MainWindow() : this(AppController.CreateDefault(), new UiPreferencesStore(), AppUpdateController.CreateDefault())
     {
     }
 
-    public MainWindow(AppController controller) : this(controller, new UiPreferencesStore())
+    public MainWindow(AppController controller) : this(controller, new UiPreferencesStore(), AppUpdateController.CreateDefault())
     {
     }
 
     public MainWindow(AppController controller, UiPreferencesStore preferencesStore)
+        : this(controller, preferencesStore, AppUpdateController.CreateDefault())
+    {
+    }
+
+    public MainWindow(AppController controller, UiPreferencesStore preferencesStore, AppUpdateController updateController)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _preferencesStore = preferencesStore ?? throw new ArgumentNullException(nameof(preferencesStore));
+        _updateController = updateController ?? throw new ArgumentNullException(nameof(updateController));
         InitializeComponent();
         Closing += Window_Closing;
     }
@@ -305,7 +312,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var window = new SettingsWindow(_controller, _screenState, OnSettingsStateChanged) { Owner = this };
+        var window = new SettingsWindow(_controller, _screenState, _updateController, OnSettingsStateChanged) { Owner = this };
         if (window.ShowDialog() == true)
         {
             await RefreshAsync();

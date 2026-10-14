@@ -82,6 +82,15 @@
             <TextBlock Text="{loc:Loc Main.Scheduler}" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
             <TextBlock x:Name="SchedulerStatusText" Text="—" Foreground="#424A44" />
 
+            <TextBlock Text="{loc:Loc Settings.UpdateSectionTitle}" Style="{StaticResource FieldLabel}" Margin="0,14,0,4" />
+            <Button x:Name="CheckForUpdatesButton" Content="{loc:Loc Settings.CheckForUpdates}"
+                    Style="{StaticResource ActionButton}" HorizontalAlignment="Left" Margin="0,3,0,4"
+                    Click="CheckForUpdates_Click" />
+            <TextBlock x:Name="UpdateStatusText" Text="—" Foreground="#424A44" TextWrapping="Wrap" />
+            <TextBlock x:Name="UpdateReleaseText" TextWrapping="Wrap" Foreground="#58615A" Margin="0,5,0,0" />
+            <TextBlock x:Name="UpdateReleaseUrlText" TextWrapping="Wrap" Foreground="#58615A" Margin="0,4,0,0" />
+            <TextBlock x:Name="UpdateAssetText" TextWrapping="Wrap" Foreground="#58615A" Margin="0,4,0,0" />
+
             <TextBlock x:Name="StatusText" Text="" Foreground="#8A4C24" TextWrapping="Wrap" Margin="0,14,0,8" />
             <WrapPanel>
                 <Button x:Name="AutomationPauseButton" Content="{loc:Loc Automation.Pause}" Style="{StaticResource ActionButton}" Click="AutomationPause_Click" />

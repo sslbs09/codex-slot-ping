@@ -9,18 +9,24 @@ public partial class SettingsWindow : Window
     private AppScreenState _screenState;
     private bool _initializing = true;
     private readonly AppController _controller;
+    private readonly AppUpdateController _updateController;
     private readonly Action<AppScreenState>? _stateChanged;
 
     public SettingsWindow(
         AppController controller,
         AppScreenState screenState,
+        AppUpdateController updateController,
         Action<AppScreenState>? stateChanged = null)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _screenState = screenState ?? throw new ArgumentNullException(nameof(screenState));
+        _updateController = updateController ?? throw new ArgumentNullException(nameof(updateController));
         _stateChanged = stateChanged;
         InitializeComponent();
         InitializeFields();
+        RenderUpdateState(_updateController.CurrentState);
+        _updateController.StateChanged += UpdateController_StateChanged;
+        Closed += (_, _) => _updateController.StateChanged -= UpdateController_StateChanged;
     }
 
     private void InitializeFields()
@@ -253,6 +259,58 @@ public partial class SettingsWindow : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    private async void CheckForUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        CheckForUpdatesButton.IsEnabled = false;
+        try
+        {
+            await _updateController.CheckForUpdatesAsync(manualRefresh: true, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            UpdateStatusText.Text = UiText.Format("Settings.Exception", exception.Message);
+        }
+        finally
+        {
+            CheckForUpdatesButton.IsEnabled = true;
+        }
+    }
+
+    private void UpdateController_StateChanged(UpdateReadModel state) => RenderUpdateState(state);
+
+    private void RenderUpdateState(UpdateReadModel state)
+    {
+        UpdateStatusText.Text = state.Status switch
+        {
+            UpdateViewStatus.Unknown => UiText.Get("Update.Unknown"),
+            UpdateViewStatus.Checking => UiText.Get("Update.Checking"),
+            UpdateViewStatus.UpToDate => UiText.Format("Update.UpToDate", state.CurrentVersion),
+            UpdateViewStatus.UpdateAvailable => UiText.Format("Update.Available", state.TargetVersion ?? string.Empty),
+            UpdateViewStatus.Failed => UiText.Format("Update.Failed", UiText.Get(state.ErrorCategory switch
+            {
+                UpdateFailureCategory.Network => "Update.Error.Network",
+                UpdateFailureCategory.Timeout => "Update.Error.Timeout",
+                UpdateFailureCategory.RateLimited => "Update.Error.RateLimited",
+                UpdateFailureCategory.MalformedResponse => "Update.Error.MalformedResponse",
+                UpdateFailureCategory.NoStableRelease => "Update.Error.NoStableRelease",
+                UpdateFailureCategory.InvalidAssetContract => "Update.Error.InvalidAssetContract",
+                UpdateFailureCategory.InvalidCurrentVersion => "Update.Error.InvalidCurrentVersion",
+                _ => "Update.Error.Api"
+            })),
+            _ => UiText.Get("Update.Unknown")
+        };
+
+        UpdateReleaseText.Text = state.ReleaseNotes ?? string.Empty;
+        UpdateReleaseText.Visibility = string.IsNullOrWhiteSpace(state.ReleaseNotes) ? Visibility.Collapsed : Visibility.Visible;
+        UpdateReleaseUrlText.Text = state.ReleaseUrl ?? string.Empty;
+        UpdateReleaseUrlText.Visibility = string.IsNullOrWhiteSpace(state.ReleaseUrl) ? Visibility.Collapsed : Visibility.Visible;
+        var assetLines = new[] { state.ZipAsset, state.ChecksumAsset }
+            .Where(asset => asset is not null)
+            .Select(asset => $"{asset!.FileName} ({asset.Size:N0} bytes)");
+        UpdateAssetText.Text = string.Join(Environment.NewLine, assetLines);
+        UpdateAssetText.Visibility = string.IsNullOrWhiteSpace(UpdateAssetText.Text) ? Visibility.Collapsed : Visibility.Visible;
+    }
 
     private void RenderAutomationControl()
     {

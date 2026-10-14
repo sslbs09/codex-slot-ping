@@ -172,6 +172,21 @@
   <data name="Settings.RemoveScheduler" xml:space="preserve"><value>删除计划任务</value></data>
   <data name="Settings.Close" xml:space="preserve"><value>关闭</value></data>
   <data name="Settings.SchedulerWarning" xml:space="preserve"><value>Windows Scheduler 只在一个计划时间唤醒 Runner。发送 Codex 请求前，Runner 会重新检查 Core eligibility。</value></data>
+  <data name="Settings.UpdateSectionTitle" xml:space="preserve"><value>应用更新</value></data>
+  <data name="Settings.CheckForUpdates" xml:space="preserve"><value>检查更新</value></data>
+  <data name="Update.Unknown" xml:space="preserve"><value>尚未检查。</value></data>
+  <data name="Update.Checking" xml:space="preserve"><value>正在检查 GitHub Releases…</value></data>
+  <data name="Update.UpToDate" xml:space="preserve"><value>当前版本 {0} 已是最新稳定版。</value></data>
+  <data name="Update.Available" xml:space="preserve"><value>发现可用版本 {0}。</value></data>
+  <data name="Update.Failed" xml:space="preserve"><value>检查更新失败（{0}）。</value></data>
+  <data name="Update.Error.Network" xml:space="preserve"><value>网络不可用</value></data>
+  <data name="Update.Error.Timeout" xml:space="preserve"><value>请求超时</value></data>
+  <data name="Update.Error.Api" xml:space="preserve"><value>GitHub API 错误</value></data>
+  <data name="Update.Error.RateLimited" xml:space="preserve"><value>GitHub API 请求次数已达限制</value></data>
+  <data name="Update.Error.MalformedResponse" xml:space="preserve"><value>GitHub 响应格式无效</value></data>
+  <data name="Update.Error.NoStableRelease" xml:space="preserve"><value>没有找到有效的稳定版本</value></data>
+  <data name="Update.Error.InvalidAssetContract" xml:space="preserve"><value>Release 安装包元数据无效</value></data>
+  <data name="Update.Error.InvalidCurrentVersion" xml:space="preserve"><value>应用版本格式无效</value></data>
   <data name="Settings.Saved" xml:space="preserve"><value>设置已保存。</value></data>
   <data name="Settings.InstallConfirmTitle" xml:space="preserve"><value>确认安装计划任务</value></data>
   <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>这会创建或更新本应用拥有的 Windows 计划任务。本地策略允许尝试时，任务会唤醒 Runner；Runner 会再次检查 eligibility，然后才向 Codex 发送已配置的提示词。是否继续？</value></data>
