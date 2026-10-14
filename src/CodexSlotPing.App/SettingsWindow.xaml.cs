@@ -1,7 +1,5 @@
 using System.Windows;
-using CodexSlotPing.Core.Codex;
-using CodexSlotPing.Core.Configuration;
-using CodexSlotPing.Core.Scheduler;
+using CodexSlotPing.App.ReadModels;
 using WpfMessageBox = System.Windows.MessageBox;
 
 namespace CodexSlotPing.App;
@@ -22,7 +20,7 @@ public partial class SettingsWindow : Window
 
     private void InitializeFields()
     {
-        var config = _screenState.Config;
+        var config = _screenState.Automation;
         Slot1Text.Text = config.LegacyFixedSlots.ElementAtOrDefault(0) ?? "07:00";
         Slot2Text.Text = config.LegacyFixedSlots.ElementAtOrDefault(1) ?? "12:01";
         Slot3Text.Text = config.LegacyFixedSlots.ElementAtOrDefault(2) ?? "17:01";
@@ -34,9 +32,8 @@ public partial class SettingsWindow : Window
 
         ReasoningCombo.DisplayMemberPath = nameof(LocalizedOption.Display);
         ReasoningCombo.SelectedValuePath = nameof(LocalizedOption.Value);
-        var reasoningValues = _screenState.Codex.SupportedReasoningEfforts.Count > 0
-            ? _screenState.Codex.SupportedReasoningEfforts.OrderBy(value => value, StringComparer.Ordinal).ToArray()
-            : CodexCliCapabilities.DocumentedReasoningEfforts.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var reasoningValues = _screenState.Codex.SupportedReasoningEfforts
+            .OrderBy(value => value, StringComparer.Ordinal).ToArray();
         foreach (var reasoning in reasoningValues.Append(config.ReasoningEffort).Distinct(StringComparer.Ordinal))
         {
             ReasoningCombo.Items.Add(new LocalizedOption(reasoning, UiText.FormatReasoningEffort(reasoning)));
@@ -56,9 +53,9 @@ public partial class SettingsWindow : Window
             AddTimeZoneOption(config.TimeZone);
         }
         TimeZoneCombo.SelectedValue = config.TimeZone;
-        EligibilityDetailsText.Text = EligibilityDecisionProjection.FormatDetails(_screenState.EligibilityDecision);
+        EligibilityDetailsText.Text = _screenState.Eligibility.DetailsText;
 
-        TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
+        TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerViewState.TimezoneChanged
             ? Visibility.Visible
             : Visibility.Collapsed;
         _initializing = false;
@@ -68,7 +65,7 @@ public partial class SettingsWindow : Window
     {
         try
         {
-            var candidate = _screenState.Config with
+            var candidate = _screenState.Automation with
             {
                 LegacyFixedSlots = [Slot1Text.Text.Trim(), Slot2Text.Text.Trim(), Slot3Text.Text.Trim(), Slot4Text.Text.Trim()],
                 Model = ModelText.Text.Trim(),
@@ -132,7 +129,7 @@ public partial class SettingsWindow : Window
     }
 
     private async Task RunSchedulerOperationAsync(
-        Func<CancellationToken, Task<SchedulerOperationResult>> operation,
+        Func<CancellationToken, Task<SchedulerOperationView>> operation,
         string successMessageKey)
     {
         try
@@ -142,8 +139,8 @@ public partial class SettingsWindow : Window
                 ? UiText.Get(successMessageKey)
                 : UiText.FormatDiagnostic(result.DiagnosticCategory ?? UiText.Get("Settings.OperationFailed"));
             _screenState = await _controller.RefreshAsync(CancellationToken.None);
-            EligibilityDetailsText.Text = EligibilityDecisionProjection.FormatDetails(_screenState.EligibilityDecision);
-            TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
+            EligibilityDetailsText.Text = _screenState.Eligibility.DetailsText;
+            TimezoneUpdateButton.Visibility = _screenState.Scheduler.State == SchedulerViewState.TimezoneChanged
                 ? Visibility.Visible
                 : Visibility.Collapsed;
         }
@@ -183,7 +180,7 @@ public partial class SettingsWindow : Window
             {
                 AddTimeZoneOption(_screenState.CurrentWindowsTimeZoneId);
             }
-            TimeZoneCombo.SelectedValue = _screenState.Config.TimeZone;
+            TimeZoneCombo.SelectedValue = _screenState.Automation.TimeZone;
             TimezoneUpdateButton.Visibility = Visibility.Collapsed;
             StatusText.Text = UiText.Get("Settings.TimezoneUpdated");
         }

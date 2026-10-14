@@ -1,6 +1,6 @@
 using System.Drawing;
 using Forms = System.Windows.Forms;
-using CodexSlotPing.Core.Scheduler;
+using CodexSlotPing.App.ReadModels;
 
 namespace CodexSlotPing.App;
 
@@ -55,7 +55,7 @@ public sealed class TrayIconController : IDisposable
         ArgumentNullException.ThrowIfNull(state);
         _schedulerItem.Text = UiText.FormatTraySchedulerState(state.Scheduler.State);
         _updatingWakeState = true;
-        _wakeItem.Checked = state.EffectiveWakeToRun;
+        _wakeItem.Checked = state.Scheduler.EffectiveWakeToRun;
         _updatingWakeState = false;
     }
 

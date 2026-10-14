@@ -8,6 +8,7 @@ using CodexSlotPing.Core.Scheduler;
 using CodexSlotPing.Core.State;
 using CodexSlotPing.Core.Testing;
 using CodexSlotPing.Core.Time;
+using CodexSlotPing.App.ReadModels;
 
 namespace CodexSlotPing.IntegrationTests.App;
 
@@ -17,6 +18,45 @@ public sealed class AppControllerTests
     private const string RunnerPath = @"C:\portable\CodexSlotPing.Runner.exe";
 
     [Fact]
+    public async Task RefreshAsync_ReturnsAppOwnedReadModelsInsteadOfCoreFacts()
+    {
+        var config = AppConfigDefaults.Create() with { Model = "gpt-read-model-test" };
+        var fixture = new Fixture(config,
+            Status(SchedulerState.OFF, exists: false, owned: false, enabled: false, RunnerPath));
+        fixture.StateStore.SetState(StateDocument.Empty() with
+        {
+            LastTest = new TestRunRecord("test-123", Now.AddMinutes(-20), "gpt-read-model-test", "high",
+                "confirmed-success", 12_345, 0)
+        });
+
+        var screen = await fixture.Controller.RefreshAsync(CancellationToken.None);
+
+        var readModelTypes = new[]
+        {
+            typeof(AppScreenState), typeof(AutomationView), typeof(EligibilityView), typeof(ScheduleView),
+            typeof(SchedulerView), typeof(CodexEnvironmentView), typeof(NextSlotView), typeof(TodaySlotView),
+            typeof(LatestKnownResultView)
+        };
+        Assert.Empty(readModelTypes
+            .SelectMany(type => type.GetProperties())
+            .Where(property => HasCoreType(property.PropertyType))
+            .Select(property => property.Name));
+
+        Assert.Equal("gpt-read-model-test", screen.Automation.Model);
+        Assert.True(screen.Automation.Enabled);
+        Assert.Equal(EligibilityViewStatus.Eligible, screen.Eligibility.Status);
+        Assert.False(string.IsNullOrWhiteSpace(screen.Eligibility.Reason));
+        Assert.False(string.IsNullOrWhiteSpace(screen.Eligibility.Confidence));
+        Assert.NotNull(screen.Schedule.NextAttemptAtUtc);
+        Assert.Equal(SchedulerViewState.Disabled, screen.Scheduler.State);
+        Assert.Equal("confirmed-success", screen.LatestKnownResult!.ResultCategory);
+
+        static bool HasCoreType(Type type) =>
+            type.Namespace?.StartsWith("CodexSlotPing.Core", StringComparison.Ordinal) == true ||
+            type.GetGenericArguments().Any(HasCoreType);
+    }
+
+    [Fact]
     public async Task RefreshAsync_UsesSchedulerReadbackInsteadOfConfigEnabledFlag()
     {
         var fixture = new Fixture(AppConfigDefaults.Create() with { Enabled = true },
@@ -24,7 +64,7 @@ public sealed class AppControllerTests
 
         var state = await fixture.Controller.RefreshAsync(CancellationToken.None);
 
-        Assert.Equal(SchedulerState.OFF, state.Scheduler.State);
+        Assert.Equal(SchedulerViewState.Disabled, state.Scheduler.State);
         Assert.False(state.Scheduler.Exists);
         Assert.Equal(1, fixture.Scheduler.ReadCount);
     }
@@ -37,7 +77,10 @@ public sealed class AppControllerTests
             var initial = Status(enabled ? SchedulerState.ON : SchedulerState.OFF,
                 exists: true, owned: true, enabled, RunnerPath);
             var fixture = new Fixture(AppConfigDefaults.Create(), initial);
-            var changed = fixture.ConfigStore.Config with { Prompt = "Updated prompt." };
+            var changed = AppStatusProjection.ProjectAutomation(fixture.ConfigStore.Config) with
+            {
+                Prompt = "Updated prompt."
+            };
 
             var result = await fixture.Controller.SaveSettingsAsync(changed, CancellationToken.None);
 
@@ -54,14 +97,14 @@ public sealed class AppControllerTests
         var pathFixture = new Fixture(AppConfigDefaults.Create(),
             Status(SchedulerState.ON, exists: true, owned: true, enabled: true, @"C:\old\CodexSlotPing.Runner.exe"));
         var pathState = await pathFixture.Controller.RefreshAsync(CancellationToken.None);
-        Assert.Equal(SchedulerState.NEEDS_REPAIR, pathState.Scheduler.State);
+        Assert.Equal(SchedulerViewState.NeedsRepair, pathState.Scheduler.State);
         Assert.Contains("runner-action-mismatch", pathState.Scheduler.ContractMismatches);
 
         var lockedConfig = AppConfigDefaults.Create() with { TimeZone = "America/New_York" };
         var timezoneFixture = new Fixture(lockedConfig,
             Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath));
         var timezoneState = await timezoneFixture.Controller.RefreshAsync(CancellationToken.None);
-        Assert.Equal(SchedulerState.TIMEZONE_CHANGED, timezoneState.Scheduler.State);
+        Assert.Equal(SchedulerViewState.TimezoneChanged, timezoneState.Scheduler.State);
         Assert.Equal("timezone-mismatch", timezoneState.Scheduler.DiagnosticCategory);
     }
 
@@ -76,11 +119,11 @@ public sealed class AppControllerTests
 
         var state = await fixture.Controller.RefreshAsync(CancellationToken.None);
 
-        Assert.Equal(SchedulerState.ON, state.Scheduler.State);
+        Assert.Equal(SchedulerViewState.Enabled, state.Scheduler.State);
         var definition = Assert.Single(fixture.Scheduler.Definitions);
         Assert.NotNull(definition.SchedulePlan.OneShotTriggerAtUtc);
-        Assert.Single(state.Scheduler.Readback!.Triggers);
-        Assert.True(state.Scheduler.Readback.Triggers[0].IsOneShot);
+        Assert.Single(fixture.Scheduler.Current.Readback!.Triggers);
+        Assert.True(fixture.Scheduler.Current.Readback.Triggers[0].IsOneShot);
     }
 
     [Fact]
@@ -91,9 +134,9 @@ public sealed class AppControllerTests
 
         var state = await fixture.Controller.RefreshAsync(CancellationToken.None);
 
-        Assert.Equal(EligibilityStatus.Eligible, state.EligibilityDecision.Status);
-        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, state.EligibilityDecision.ExplanationReason);
-        Assert.NotNull(state.SchedulePlan.OneShotTriggerAtUtc);
+        Assert.Equal(EligibilityViewStatus.Eligible, state.Eligibility.Status);
+        Assert.Contains(UiText.Get("Eligibility.Reason.ExternalManualUsageUnknown"), state.Eligibility.DetailsText);
+        Assert.NotNull(state.Schedule.NextAttemptAtUtc);
         Assert.True(Assert.Single(fixture.Scheduler.Definitions).SchedulePlan.OneShotTriggerAtUtc.HasValue);
     }
 
@@ -120,8 +163,8 @@ public sealed class AppControllerTests
 
         var state = await fixture.Controller.RefreshAsync(CancellationToken.None);
 
-        Assert.Equal(EligibilityStatus.Blocked, state.EligibilityDecision.Status);
-        Assert.Null(state.SchedulePlan.OneShotTriggerAtUtc);
+        Assert.Equal(EligibilityViewStatus.Blocked, state.Eligibility.Status);
+        Assert.Null(state.Schedule.NextAttemptAtUtc);
         Assert.Empty(fixture.Scheduler.Definitions);
     }
 
@@ -149,10 +192,11 @@ public sealed class AppControllerTests
         var screen = await fixture.Controller.RefreshAsync(CancellationToken.None);
         var runnerClaim = await fixture.ClaimService.TryClaimCurrentSlotAsync(CancellationToken.None);
 
-        Assert.Equal(EligibilityStatus.Eligible, screen.EligibilityDecision.Status);
-        Assert.Equal(EligibilityReason.Ready, screen.EligibilityDecision.Reason);
-        Assert.Equal(EligibilityReason.ExternalManualUsageUnknown, screen.EligibilityDecision.ExplanationReason);
-        Assert.Equal(screen.EligibilityDecision.Reason, runnerClaim.EligibilityDecision!.Reason);
+        Assert.Equal(EligibilityViewStatus.Eligible, screen.Eligibility.Status);
+        Assert.Contains(UiText.Get("Eligibility.Reason.Ready"), screen.Eligibility.DetailsText);
+        Assert.Contains(UiText.Get("Eligibility.Reason.ExternalManualUsageUnknown"), screen.Eligibility.DetailsText);
+        Assert.Equal(screen.Eligibility.Reason,
+            UiText.Get($"Eligibility.Reason.{runnerClaim.EligibilityDecision!.Reason}"));
     }
 
     [Fact]
@@ -160,7 +204,7 @@ public sealed class AppControllerTests
     {
         var fixture = new Fixture(AppConfigDefaults.Create(),
             Status(SchedulerState.OFF, exists: false, owned: false, enabled: false, RunnerPath));
-        var preview = await fixture.Controller.GetTestNowEligibilityDecisionAsync(CancellationToken.None);
+        var preview = await fixture.Controller.GetTestNowEligibilityViewAsync(CancellationToken.None);
         Assert.True(preview.RequiresConfirmation);
 
         var highWater = Now.AddMinutes(5);
@@ -179,7 +223,7 @@ public sealed class AppControllerTests
 
         Assert.NotNull(response);
         Assert.Null(response!.Result);
-        Assert.Equal(EligibilityReason.ClockRollback, response.Decision.Reason);
+        Assert.Contains(UiText.Get("Eligibility.Reason.ClockRollback"), response.Decision.DetailsText);
         Assert.Null(fixture.StateStore.State.ActiveTestNowClaim);
         Assert.False(fixture.StateStore.State.Eligibility!.HasUnresolvedClaim);
     }
@@ -189,7 +233,10 @@ public sealed class AppControllerTests
     {
         var fixture = new Fixture(AppConfigDefaults.Create(),
             Status(SchedulerState.OFF, exists: false, owned: false, enabled: false, RunnerPath));
-        var invalid = fixture.ConfigStore.Config with { LegacyFixedSlots = ["bad", "12:01", "17:01", "22:01"] };
+        var invalid = AppStatusProjection.ProjectAutomation(fixture.ConfigStore.Config) with
+        {
+            LegacyFixedSlots = ["bad", "12:01", "17:01", "22:01"]
+        };
 
         var result = await fixture.Controller.SaveSettingsAsync(invalid, CancellationToken.None);
 

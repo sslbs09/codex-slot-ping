@@ -11,33 +11,16 @@ using CodexSlotPing.Core.Slots;
 using CodexSlotPing.Core.State;
 using CodexSlotPing.Core.Testing;
 using CodexSlotPing.Core.Time;
+using CodexSlotPing.App.ReadModels;
 
 namespace CodexSlotPing.App;
 
-public sealed record TodaySlotState(int Position, TimeOnly LocalTime, FormalSlotStatus Status);
-
-public sealed record AppScreenState(
-    AppConfig Config,
-    StateDocument PersistentState,
-    EnvironmentStatus Codex,
-    SchedulerStatus Scheduler,
-    SlotScheduleEntry? NextSlot,
-    IReadOnlyList<TodaySlotState> TodaySlots,
-    SchedulePlan SchedulePlan,
-    EligibilityDecision EligibilityDecision,
-    DateTimeOffset NowUtc,
-    string CurrentWindowsTimeZoneId,
-    string LogsDirectory)
-{
-    public bool EffectiveWakeToRun => Scheduler.Exists && Scheduler.IsOwned && Scheduler.Readback is not null
-        ? Scheduler.Readback.WakeToRun
-        : Config.WakeToRun;
-}
+internal sealed record TodaySlotState(int Position, TimeOnly LocalTime, FormalSlotStatus Status);
 
 public sealed record ConfigSaveResult(
     bool Succeeded,
     IReadOnlyList<string> Errors,
-    SchedulerStatus? SchedulerStatus,
+    SchedulerView? SchedulerStatus,
     bool ConfigSaved);
 
 public sealed class AppController
@@ -144,13 +127,31 @@ public sealed class AppController
         var nextSlot = _nextSlotCalculator.GetNext(config, persistentState, now, currentTimeZoneId);
         var todaySlots = BuildTodaySlots(config, persistentState, now, currentTimeZoneId);
 
-        return new AppScreenState(config, persistentState, environment, scheduler, nextSlot, todaySlots,
-            scheduling.Plan,
+        return AppStatusProjection.Create(
+            config,
+            persistentState,
             eligibilityDecision,
-            now, currentTimeZoneId, _logsDirectory);
+            scheduling.Plan,
+            scheduler,
+            environment,
+            nextSlot,
+            todaySlots,
+            now,
+            currentTimeZoneId,
+            _logsDirectory);
     }
 
-    public async Task<ConfigSaveResult> SaveSettingsAsync(AppConfig candidate, CancellationToken cancellationToken)
+    public async Task<ConfigSaveResult> SaveSettingsAsync(
+        AutomationView candidate,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        var currentConfig = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
+        var config = AppStatusProjection.ToConfig(candidate, currentConfig);
+        return await SaveSettingsCoreAsync(config, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ConfigSaveResult> SaveSettingsCoreAsync(AppConfig candidate, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(candidate);
         cancellationToken.ThrowIfCancellationRequested();
@@ -187,7 +188,8 @@ public sealed class AppController
         if (status.State == SchedulerState.TIMEZONE_CHANGED)
         {
             return new ConfigSaveResult(false,
-                ["Timezone changed. Confirm updating the timezone lock and owned scheduler before saving."], status, false);
+                ["Timezone changed. Confirm updating the timezone lock and owned scheduler before saving."],
+                AppStatusProjection.ProjectScheduler(status, candidate.WakeToRun), false);
         }
 
         var configToSave = status.Exists && status.IsOwned
@@ -203,12 +205,14 @@ public sealed class AppController
         }
         catch (Exception)
         {
-            return new ConfigSaveResult(false, ["Settings could not be saved."], status, false);
+            return new ConfigSaveResult(false, ["Settings could not be saved."],
+                AppStatusProjection.ProjectScheduler(status, configToSave.WakeToRun), false);
         }
 
         if (!status.Exists || !status.IsOwned || status.State is SchedulerState.CONFLICT or SchedulerState.ERROR)
         {
-            return new ConfigSaveResult(true, Array.Empty<string>(), status, true);
+            return new ConfigSaveResult(true, Array.Empty<string>(),
+                AppStatusProjection.ProjectScheduler(status, configToSave.WakeToRun), true);
         }
 
         var scheduling = await _schedulingCoordinator.EvaluateAsync(cancellationToken).ConfigureAwait(false);
@@ -225,14 +229,18 @@ public sealed class AppController
         catch (Exception)
         {
             return new ConfigSaveResult(false, ["Settings were saved, but the owned scheduler needs repair."],
-                status with { State = SchedulerState.ERROR, DiagnosticCategory = "scheduler-update-failed" }, true);
+                AppStatusProjection.ProjectScheduler(
+                    status with { State = SchedulerState.ERROR, DiagnosticCategory = "scheduler-update-failed" },
+                    configToSave.WakeToRun), true);
         }
 
         if (!update.Succeeded)
         {
             return new ConfigSaveResult(false,
                 ["Settings were saved, but the owned scheduler needs repair."],
-                update.Status ?? status with { State = SchedulerState.ERROR, DiagnosticCategory = update.DiagnosticCategory },
+                AppStatusProjection.ProjectScheduler(
+                    update.Status ?? status with { State = SchedulerState.ERROR, DiagnosticCategory = update.DiagnosticCategory },
+                    configToSave.WakeToRun),
                 true);
         }
 
@@ -241,13 +249,15 @@ public sealed class AppController
         if (verified.State is not SchedulerState.ON and not SchedulerState.OFF)
         {
             return new ConfigSaveResult(false,
-                ["Settings were saved, but scheduler readback shows that repair is still needed."], verified, true);
+                ["Settings were saved, but scheduler readback shows that repair is still needed."],
+                AppStatusProjection.ProjectScheduler(verified, configToSave.WakeToRun), true);
         }
 
-        return new ConfigSaveResult(true, Array.Empty<string>(), verified, true);
+        return new ConfigSaveResult(true, Array.Empty<string>(),
+            AppStatusProjection.ProjectScheduler(verified, configToSave.WakeToRun), true);
     }
 
-    public async Task<SchedulerOperationResult> InstallOrUpdateSchedulerAsync(CancellationToken cancellationToken)
+    public async Task<SchedulerOperationView> InstallOrUpdateSchedulerAsync(CancellationToken cancellationToken)
     {
         var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
         var environment = await _environmentDetector.DetectAsync(cancellationToken).ConfigureAwait(false);
@@ -255,18 +265,18 @@ public sealed class AppController
         var validation = ConfigValidator.Validate(config, currentTimeZoneId, environment.SupportedReasoningEfforts);
         if (!validation.IsValid || validation.NormalizedConfig is null)
         {
-            return new SchedulerOperationResult(false, "invalid-configuration", null);
+            return new SchedulerOperationView(false, "invalid-configuration");
         }
 
         if (!environment.IsReady)
         {
-            return new SchedulerOperationResult(false,
-                environment.DiagnosticCodes.FirstOrDefault() ?? "cli-environment-not-ready", null);
+            return new SchedulerOperationView(false,
+                environment.DiagnosticCodes.FirstOrDefault() ?? "cli-environment-not-ready");
         }
 
         if (!File.Exists(_runnerPath))
         {
-            return new SchedulerOperationResult(false, "runner-path-missing", null);
+            return new SchedulerOperationView(false, "runner-path-missing");
         }
 
         var installConfig = validation.NormalizedConfig with { Enabled = true };
@@ -284,29 +294,29 @@ public sealed class AppController
         }
         catch (Exception)
         {
-            return new SchedulerOperationResult(false, "scheduler-unavailable", null);
+            return new SchedulerOperationView(false, "scheduler-unavailable");
         }
 
         if (!operation.Succeeded)
         {
-            return operation;
+            return ProjectSchedulerOperation(operation);
         }
 
         await _configStore.SaveAsync(installConfig, cancellationToken).ConfigureAwait(false);
         var readback = await ReadHealthySchedulerAsync(
             installConfig, currentTimeZoneId, cancellationToken, definition.SchedulePlan).ConfigureAwait(false);
         return readback.State == SchedulerState.ON
-            ? new SchedulerOperationResult(true, null, readback)
-            : new SchedulerOperationResult(false, readback.DiagnosticCategory ?? "scheduler-readback-failed", readback);
+            ? new SchedulerOperationView(true, null)
+            : new SchedulerOperationView(false, readback.DiagnosticCategory ?? "scheduler-readback-failed");
     }
 
-    public async Task<SchedulerOperationResult> DisableSchedulerAsync(CancellationToken cancellationToken)
+    public async Task<SchedulerOperationView> DisableSchedulerAsync(CancellationToken cancellationToken)
     {
         var operation = await _schedulerGateway.DisableAsync(
             SchedulerTaskContract.ProductionTaskPath, cancellationToken).ConfigureAwait(false);
         if (!operation.Succeeded)
         {
-            return operation;
+            return ProjectSchedulerOperation(operation);
         }
 
         var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
@@ -314,17 +324,17 @@ public sealed class AppController
         var readback = await ReadHealthySchedulerAsync(config, _timeZoneProvider.CurrentWindowsTimeZoneId, cancellationToken)
             .ConfigureAwait(false);
         return readback.State == SchedulerState.OFF
-            ? new SchedulerOperationResult(true, null, readback)
-            : new SchedulerOperationResult(false, readback.DiagnosticCategory ?? "scheduler-readback-failed", readback);
+            ? new SchedulerOperationView(true, null)
+            : new SchedulerOperationView(false, readback.DiagnosticCategory ?? "scheduler-readback-failed");
     }
 
-    public async Task<SchedulerOperationResult> RemoveSchedulerAsync(CancellationToken cancellationToken)
+    public async Task<SchedulerOperationView> RemoveSchedulerAsync(CancellationToken cancellationToken)
     {
         var operation = await _schedulerGateway.RemoveAsync(
             SchedulerTaskContract.ProductionTaskPath, cancellationToken).ConfigureAwait(false);
         if (!operation.Succeeded)
         {
-            return operation;
+            return ProjectSchedulerOperation(operation);
         }
 
         var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
@@ -332,21 +342,24 @@ public sealed class AppController
         var readback = await ReadHealthySchedulerAsync(config, _timeZoneProvider.CurrentWindowsTimeZoneId, cancellationToken)
             .ConfigureAwait(false);
         return !readback.Exists
-            ? new SchedulerOperationResult(true, null, readback)
-            : new SchedulerOperationResult(false, readback.DiagnosticCategory ?? "scheduler-remove-unconfirmed", readback);
+            ? new SchedulerOperationView(true, null)
+            : new SchedulerOperationView(false, readback.DiagnosticCategory ?? "scheduler-remove-unconfirmed");
     }
 
     public async Task<ConfigSaveResult> SetWakeToRunAsync(bool wakeToRun, CancellationToken cancellationToken)
     {
         var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
-        return await SaveSettingsAsync(config with { WakeToRun = wakeToRun }, cancellationToken).ConfigureAwait(false);
+        return await SaveSettingsCoreAsync(config with { WakeToRun = wakeToRun }, cancellationToken).ConfigureAwait(false);
     }
 
-    public Task<EligibilityDecision> GetTestNowEligibilityDecisionAsync(CancellationToken cancellationToken) =>
-        _claimService.GetEligibilityDecisionAsync(
-            EligibilityRequest.TestNow(_clock.UtcNow.ToUniversalTime()), cancellationToken);
+    public async Task<EligibilityView> GetTestNowEligibilityViewAsync(CancellationToken cancellationToken)
+    {
+        var decision = await _claimService.GetEligibilityDecisionAsync(
+            EligibilityRequest.TestNow(_clock.UtcNow.ToUniversalTime()), cancellationToken).ConfigureAwait(false);
+        return EligibilityDecisionProjection.Create(decision);
+    }
 
-    public async Task<TestNowRunResponse?> RunTestNowAsync(bool userConfirmed, CancellationToken cancellationToken)
+    public async Task<TestNowRunView?> RunTestNowAsync(bool userConfirmed, CancellationToken cancellationToken)
     {
         if (!userConfirmed)
         {
@@ -360,7 +373,10 @@ public sealed class AppController
 
         try
         {
-            return await _runTestNow(Guid.NewGuid().ToString("N"), cancellationToken).ConfigureAwait(false);
+            var response = await _runTestNow(Guid.NewGuid().ToString("N"), cancellationToken).ConfigureAwait(false);
+            return new TestNowRunView(
+                EligibilityDecisionProjection.Create(response.Decision),
+                response.Result is null ? null : AppStatusProjection.ProjectTestRunResult(response.Result));
         }
         finally
         {
@@ -368,7 +384,7 @@ public sealed class AppController
         }
     }
 
-    public async Task<TimezoneUpdateResult> ApplyCurrentTimeZoneChangeAsync(
+    public async Task<TimezoneUpdateView> ApplyCurrentTimeZoneChangeAsync(
         bool userConfirmed,
         CancellationToken cancellationToken)
     {
@@ -378,36 +394,53 @@ public sealed class AppController
             string.Equals(config.TimeZone, currentTimeZoneId, StringComparison.OrdinalIgnoreCase))
         {
             var current = await ReadHealthySchedulerAsync(config, currentTimeZoneId, cancellationToken).ConfigureAwait(false);
-            return new TimezoneUpdateResult(TimezoneUpdateState.UNCHANGED, config, current,
-                current.DiagnosticCategory, false);
+            return ProjectTimezoneUpdate(new TimezoneUpdateResult(TimezoneUpdateState.UNCHANGED, config, current,
+                current.DiagnosticCategory, false));
         }
 
         var currentStatus = await _schedulerGateway.ReadStatusAsync(
             SchedulerTaskContract.ProductionTaskPath, _runnerPath, config.TimeZone, cancellationToken).ConfigureAwait(false);
         if (currentStatus.Exists && currentStatus.IsOwned || currentStatus.State is SchedulerState.CONFLICT or SchedulerState.ERROR)
         {
-            return await _timezoneUpdateService.ApplyAsync(
+            var result = await _timezoneUpdateService.ApplyAsync(
                 config,
                 _runnerPath,
                 currentTimeZoneId,
                 userConfirmed,
                 cancellationToken).ConfigureAwait(false);
+            return ProjectTimezoneUpdate(result);
         }
 
         var health = _schedulerHealthEvaluator.Evaluate(currentStatus, _runnerPath, config.TimeZone,
             currentTimeZoneId);
         if (!userConfirmed)
         {
-            return new TimezoneUpdateResult(TimezoneUpdateState.TIMEZONE_CHANGED, config, health,
-                "timezone-confirmation-required", false);
+            return ProjectTimezoneUpdate(new TimezoneUpdateResult(TimezoneUpdateState.TIMEZONE_CHANGED, config, health,
+                "timezone-confirmation-required", false));
         }
 
         var updatedConfig = config with { TimeZone = currentTimeZoneId };
         await _configStore.SaveAsync(updatedConfig, cancellationToken).ConfigureAwait(false);
         var updatedStatus = await ReadHealthySchedulerAsync(updatedConfig, currentTimeZoneId, cancellationToken)
             .ConfigureAwait(false);
-        return new TimezoneUpdateResult(TimezoneUpdateState.UPDATED, updatedConfig, updatedStatus, null, true);
+        return ProjectTimezoneUpdate(new TimezoneUpdateResult(
+            TimezoneUpdateState.UPDATED, updatedConfig, updatedStatus, null, true));
     }
+
+    private static SchedulerOperationView ProjectSchedulerOperation(SchedulerOperationResult result) =>
+        new(result.Succeeded, result.DiagnosticCategory);
+
+    private static TimezoneUpdateView ProjectTimezoneUpdate(TimezoneUpdateResult result) => new(
+        result.State switch
+        {
+            TimezoneUpdateState.UNCHANGED => TimezoneUpdateViewState.Unchanged,
+            TimezoneUpdateState.TIMEZONE_CHANGED => TimezoneUpdateViewState.TimezoneChanged,
+            TimezoneUpdateState.UPDATED => TimezoneUpdateViewState.Updated,
+            _ => TimezoneUpdateViewState.Error
+        },
+        result.Succeeded,
+        result.DiagnosticCategory,
+        result.ConfigSaved);
 
     private async Task<SchedulerStatus> ReadHealthySchedulerAsync(
         AppConfig config,

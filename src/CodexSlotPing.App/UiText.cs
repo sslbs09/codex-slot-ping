@@ -1,8 +1,6 @@
 using System.Globalization;
 using System.Resources;
-using CodexSlotPing.Core.Codex;
-using CodexSlotPing.Core.Scheduler;
-using CodexSlotPing.Core.Slots;
+using CodexSlotPing.App.ReadModels;
 
 namespace CodexSlotPing.App;
 
@@ -52,48 +50,48 @@ public static class UiText
             ? Get("Settings.TimezoneSystem", culture ?? CultureInfo.CurrentUICulture)
             : canonicalValue;
 
-    public static string FormatSchedulerState(SchedulerState state, CultureInfo? culture = null)
+    public static string FormatSchedulerState(SchedulerViewState state, CultureInfo? culture = null)
     {
         var key = state switch
         {
-            SchedulerState.ON or SchedulerState.OWNED_ENABLED => "State.Enabled",
-            SchedulerState.OFF or SchedulerState.OWNED_DISABLED => "State.Disabled",
-            SchedulerState.NOT_INSTALLED => "State.NotInstalled",
-            SchedulerState.NEEDS_REPAIR or SchedulerState.DRIFTED => "State.NeedsRepair",
-            SchedulerState.TIMEZONE_CHANGED => "State.TimezoneChanged",
-            SchedulerState.CONFLICT => "State.Conflict",
+            SchedulerViewState.Enabled => "State.Enabled",
+            SchedulerViewState.Disabled => "State.Disabled",
+            SchedulerViewState.NotInstalled => "State.NotInstalled",
+            SchedulerViewState.NeedsRepair => "State.NeedsRepair",
+            SchedulerViewState.TimezoneChanged => "State.TimezoneChanged",
+            SchedulerViewState.Conflict => "State.Conflict",
             _ => "State.Unknown"
         };
         return Get(key, culture ?? CultureInfo.CurrentUICulture);
     }
 
-    public static string FormatTraySchedulerState(SchedulerState state, CultureInfo? culture = null) =>
+    public static string FormatTraySchedulerState(SchedulerViewState state, CultureInfo? culture = null) =>
         string.Format(
             ResolveCulture(culture ?? CultureInfo.CurrentUICulture),
             Get("Tray.SchedulerState", culture ?? CultureInfo.CurrentUICulture),
             FormatSchedulerState(state, culture));
 
-    public static string FormatSlotStatus(FormalSlotStatus status, CultureInfo? culture = null)
+    public static string FormatSlotStatus(SlotViewStatus status, CultureInfo? culture = null)
     {
         var key = status switch
         {
-            FormalSlotStatus.CONFIRMED_SUCCESS => "Slot.Confirmed",
-            FormalSlotStatus.ATTEMPTED_UNCONFIRMED => "Slot.AttemptedUnconfirmed",
-            FormalSlotStatus.PRELAUNCH_FAILED => "Slot.PrelaunchFailed",
-            FormalSlotStatus.MISSED => "Slot.Missed",
-            FormalSlotStatus.CLAIMED => "Slot.InProgress",
+            SlotViewStatus.ConfirmedSuccess => "Slot.Confirmed",
+            SlotViewStatus.AttemptedUnconfirmed => "Slot.AttemptedUnconfirmed",
+            SlotViewStatus.PrelaunchFailed => "Slot.PrelaunchFailed",
+            SlotViewStatus.Missed => "Slot.Missed",
+            SlotViewStatus.Claimed => "Slot.InProgress",
             _ => "Slot.Pending"
         };
         return Get(key, culture ?? CultureInfo.CurrentUICulture);
     }
 
-    public static string FormatTestResult(CodexResultClassification classification, long elapsedMilliseconds,
+    public static string FormatTestResult(TestResultViewStatus classification, long elapsedMilliseconds,
         string? diagnosticCategory)
     {
         var status = classification switch
         {
-            CodexResultClassification.CONFIRMED_SUCCESS => Get("Slot.Confirmed"),
-            CodexResultClassification.ATTEMPTED_UNCONFIRMED => Get("Slot.AttemptedUnconfirmed"),
+            TestResultViewStatus.ConfirmedSuccess => Get("Slot.Confirmed"),
+            TestResultViewStatus.AttemptedUnconfirmed => Get("Slot.AttemptedUnconfirmed"),
             _ => Get("Slot.PrelaunchFailed")
         };
         var summary = Format("TestResult.Summary", status, elapsedMilliseconds);

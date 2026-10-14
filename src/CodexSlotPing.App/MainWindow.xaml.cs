@@ -4,13 +4,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using CodexSlotPing.Core.Codex;
-using CodexSlotPing.Core.Configuration;
-using CodexSlotPing.Core.Eligibility;
-using CodexSlotPing.Core.Scheduler;
-using CodexSlotPing.Core.Slots;
-using CodexSlotPing.Core.State;
-using CodexSlotPing.Core.Testing;
+using CodexSlotPing.App.ReadModels;
 using WpfButton = System.Windows.Controls.Button;
 using WpfClipboard = System.Windows.Clipboard;
 using WpfColorConverter = System.Windows.Media.ColorConverter;
@@ -83,10 +77,10 @@ public partial class MainWindow : Window
         };
         VersionText.Text = state.Codex.CliVersion ?? UiText.Get("Main.CliVersionUnavailable");
 
-        if (state.SchedulePlan.OneShotTriggerAtUtc is not { } nextAttemptUtc)
+        if (state.Schedule.NextAttemptAtUtc is not { } nextAttemptUtc)
         {
             NextSlotTimeText.Text = "—";
-            NextSlotCountdownText.Text = state.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
+            NextSlotCountdownText.Text = state.Scheduler.State == SchedulerViewState.TimezoneChanged
                 ? UiText.Get("Main.UpdateTimezoneForNext")
                 : UiText.Get("Main.NoPlannedAttempt");
         }
@@ -101,11 +95,11 @@ public partial class MainWindow : Window
         TodayRows.ItemsSource = state.TodaySlots.Select(slot => new TodayRow(
             slot.LocalTime.ToString("HH:mm"),
             FormatSlotStatus(slot.Status))).ToArray();
-        EligibilityDetailsText.Text = EligibilityDecisionProjection.FormatDetails(state.EligibilityDecision);
-        ModelText.Text = state.Config.Model;
-        ReasoningText.Text = UiText.FormatReasoningEffort(state.Config.ReasoningEffort);
-        SchedulerText.Text = FormatScheduler(state.Scheduler);
-        WakeText.Text = UiText.Get(state.EffectiveWakeToRun ? "State.Enabled" : "State.Disabled");
+        EligibilityDetailsText.Text = state.Eligibility.DetailsText;
+        ModelText.Text = state.Automation.Model;
+        ReasoningText.Text = UiText.FormatReasoningEffort(state.Automation.ReasoningEffort);
+        SchedulerText.Text = UiText.FormatSchedulerState(state.Scheduler.State);
+        WakeText.Text = UiText.Get(state.Scheduler.EffectiveWakeToRun ? "State.Enabled" : "State.Disabled");
 
         var messages = new List<string>();
         if (!codexReady)
@@ -123,24 +117,24 @@ public partial class MainWindow : Window
 
         switch (state.Scheduler.State)
         {
-            case SchedulerState.NEEDS_REPAIR:
+            case SchedulerViewState.NeedsRepair:
                 messages.Add(state.Scheduler.DiagnosticCategory == "runner-action-mismatch"
                     ? UiText.Get("Scheduler.RepairPathChanged")
                     : UiText.Get("Scheduler.RepairContract"));
                 break;
-            case SchedulerState.TIMEZONE_CHANGED:
-                messages.Add(UiText.Format("Scheduler.TimezoneChanged", state.Config.TimeZone, state.CurrentWindowsTimeZoneId));
+            case SchedulerViewState.TimezoneChanged:
+                messages.Add(UiText.Format("Scheduler.TimezoneChanged", state.Automation.TimeZone, state.CurrentWindowsTimeZoneId));
                 break;
-            case SchedulerState.CONFLICT:
+            case SchedulerViewState.Conflict:
                 messages.Add(UiText.Get("Scheduler.Conflict"));
                 break;
-            case SchedulerState.ERROR:
+            case SchedulerViewState.Error:
                 messages.Add(UiText.Get("Scheduler.ReadFailed"));
                 break;
         }
 
         StatusMessageText.Text = string.Join(Environment.NewLine, messages);
-        TimezoneActionButton.Visibility = state.Scheduler.State == SchedulerState.TIMEZONE_CHANGED
+        TimezoneActionButton.Visibility = state.Scheduler.State == SchedulerViewState.TimezoneChanged
             ? Visibility.Visible
             : Visibility.Collapsed;
     }
@@ -156,10 +150,10 @@ public partial class MainWindow : Window
 
         ShowFromTray();
 
-        EligibilityDecision testNowDecision;
+        EligibilityView testNowDecision;
         try
         {
-            testNowDecision = await _controller.GetTestNowEligibilityDecisionAsync(CancellationToken.None);
+            testNowDecision = await _controller.GetTestNowEligibilityViewAsync(CancellationToken.None);
         }
         catch (Exception exception)
         {
@@ -171,10 +165,10 @@ public partial class MainWindow : Window
         if (!testNowDecision.RequiresConfirmation)
         {
             WpfMessageBox.Show(
-                EligibilityDecisionProjection.FormatDetails(testNowDecision),
+                testNowDecision.DetailsText,
                 UiText.Get("Main.TestNowResultTitle"),
                 MessageBoxButton.OK,
-                testNowDecision.Status == EligibilityStatus.Eligible
+                testNowDecision.IsEligible
                     ? MessageBoxImage.Information
                     : MessageBoxImage.Warning);
             await RefreshAsync();
@@ -182,7 +176,7 @@ public partial class MainWindow : Window
         }
 
         var answer = WpfMessageBox.Show(
-            EligibilityDecisionProjection.FormatTestNowConfirmation(testNowDecision),
+            testNowDecision.TestNowConfirmationText,
             UiText.Get("Main.TestNowConfirmTitle"),
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
@@ -201,14 +195,16 @@ public partial class MainWindow : Window
             var response = await _controller.RunTestNowAsync(true, CancellationToken.None);
             if (response?.Result is { } result)
             {
-                WpfMessageBox.Show(FormatTestResult(result), UiText.Get("Main.TestNowResultTitle"), MessageBoxButton.OK,
-                    result.Invocation.Classification == CodexResultClassification.CONFIRMED_SUCCESS
+                WpfMessageBox.Show(UiText.FormatTestResult(
+                        result.Classification, result.ElapsedMilliseconds, result.DiagnosticCategory),
+                    UiText.Get("Main.TestNowResultTitle"), MessageBoxButton.OK,
+                    result.Classification == TestResultViewStatus.ConfirmedSuccess
                         ? MessageBoxImage.Information
                         : MessageBoxImage.Warning);
             }
             else if (response is not null)
             {
-                WpfMessageBox.Show(EligibilityDecisionProjection.FormatDetails(response.Decision),
+                WpfMessageBox.Show(response.Decision.DetailsText,
                     UiText.Get("Main.TestNowResultTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             else
@@ -397,14 +393,7 @@ public partial class MainWindow : Window
         await RefreshAsync();
     }
 
-    private static string FormatSlotStatus(FormalSlotStatus status) => UiText.FormatSlotStatus(status);
-
-    private static string FormatScheduler(SchedulerStatus status) => UiText.FormatSchedulerState(status.State);
-
-    private static string FormatTestResult(TestRunResult result) => UiText.FormatTestResult(
-        result.Invocation.Classification,
-        result.Invocation.ElapsedMilliseconds,
-        result.Invocation.DiagnosticCategory);
+    private static string FormatSlotStatus(SlotViewStatus status) => UiText.FormatSlotStatus(status);
 
     private static string FormatDuration(TimeSpan duration)
     {
