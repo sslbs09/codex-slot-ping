@@ -8,7 +8,8 @@ public static class EligibilityDecisionProjection
 {
     public static EligibilityView Create(
         EligibilityDecision decision,
-        CultureInfo? culture = null)
+        CultureInfo? culture = null,
+        DateTimeOffset? nextPlannedAttemptAtUtc = null)
     {
         ArgumentNullException.ThrowIfNull(decision);
         var selectedCulture = UiText.ResolveCulture(culture ?? CultureInfo.CurrentUICulture);
@@ -26,11 +27,14 @@ public static class EligibilityDecisionProjection
             decision.Status == EligibilityStatus.Eligible,
             string.Empty,
             string.Empty);
-        return view with
+        var projected = view with
         {
             DetailsText = FormatDetails(view, selectedCulture),
-            TestNowConfirmationText = FormatTestNowConfirmation(view, selectedCulture)
+            TestNowConfirmationText = FormatTestNowConfirmation(view, selectedCulture),
+            UserFacingStatus = FormatUserFacingStatus(view, selectedCulture),
+            NextPlannedAttemptText = FormatPlannedAttempt(nextPlannedAttemptAtUtc, selectedCulture)
         };
+        return projected with { Details = FormatExplainabilityDetails(projected, selectedCulture) };
     }
 
     public static string FormatTestNowConfirmation(
@@ -84,4 +88,35 @@ public static class EligibilityDecisionProjection
                 culture,
                 UiText.Get("Main.EligibilityExplanation", culture),
                 explanation);
+
+    private static string FormatUserFacingStatus(EligibilityView view, CultureInfo culture)
+    {
+        var key = view.Status switch
+        {
+            EligibilityViewStatus.Eligible => "Eligibility.UserFacingStatus.Eligible",
+            EligibilityViewStatus.NotYetEligible => "Eligibility.UserFacingStatus.NotYetEligible",
+            EligibilityViewStatus.Blocked => "Eligibility.UserFacingStatus.Blocked",
+            EligibilityViewStatus.ConfirmationRequired => "Eligibility.UserFacingStatus.ConfirmationRequired",
+            _ => "Eligibility.UserFacingStatus.Unknown"
+        };
+        var template = UiText.Get(key, culture);
+        return view.Status == EligibilityViewStatus.Blocked
+            ? string.Format(culture, template, view.ReasonText)
+            : template;
+    }
+
+    private static string FormatPlannedAttempt(DateTimeOffset? plannedAttemptAtUtc, CultureInfo culture) =>
+        plannedAttemptAtUtc?.ToLocalTime().ToString("g", culture)
+        ?? UiText.Get("Eligibility.None", culture);
+
+    private static string FormatExplainabilityDetails(EligibilityView view, CultureInfo culture) =>
+        string.Format(
+            culture,
+            UiText.Get("Main.EligibilityExplainabilityDetails", culture),
+            view.UserFacingStatus,
+            Environment.NewLine,
+            view.ReasonText,
+            view.ConfidenceText,
+            view.NextPlannedAttemptText,
+            FormatExplanation(view.Explanation, culture));
 }

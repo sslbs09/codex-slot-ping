@@ -73,7 +73,14 @@ public sealed record EligibilityView(
     bool RequiresConfirmation,
     bool IsEligible,
     string DetailsText,
-    string TestNowConfirmationText);
+    string TestNowConfirmationText)
+{
+    public string UserFacingStatus { get; init; } = string.Empty;
+    public string ReasonText => Reason;
+    public string ConfidenceText => Confidence;
+    public string NextPlannedAttemptText { get; init; } = string.Empty;
+    public string Details { get; init; } = DetailsText;
+}
 
 public sealed record ScheduleView(DateTimeOffset? NextAttemptAtUtc);
 

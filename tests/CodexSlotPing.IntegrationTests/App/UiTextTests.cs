@@ -119,6 +119,52 @@ public sealed class UiTextTests
         Assert.Contains("说明：依据本地调度策略计算", confirmation);
     }
 
+    [Theory]
+    [InlineData(EligibilityStatus.Eligible, EligibilityReason.Ready,
+        "当前条件满足，等待计划唤醒", "Current conditions are met; waiting for the planned wake-up")]
+    [InlineData(EligibilityStatus.NotYetEligible, EligibilityReason.LocalAttemptSpacing,
+        "等待下一次计划检查", "Waiting for the next planned check")]
+    [InlineData(EligibilityStatus.Blocked, EligibilityReason.UsageLimitWithoutTrustedReset,
+        "自动调度被阻止：已观察到使用额度限制，但没有可信的重置时间",
+        "Automatic scheduling is blocked: Usage limit observed without a trusted reset time")]
+    [InlineData(EligibilityStatus.Unknown, EligibilityReason.InvalidState,
+        "当前无法确认条件", "Current conditions cannot be confirmed")]
+    public void EligibilityDecisionProjection_ExplainsStatusDeterministically(
+        EligibilityStatus status,
+        EligibilityReason reason,
+        string expectedChineseStatus,
+        string expectedEnglishStatus)
+    {
+        var plannedAttemptAtUtc = new DateTimeOffset(2026, 10, 14, 9, 30, 0, TimeSpan.Zero);
+        var decision = new EligibilityDecision(
+            EligibilityDecision.CurrentSchemaVersion,
+            EligibilityIntent.Scheduled,
+            status,
+            reason,
+            null,
+            Confidence.Medium,
+            ObservationSource.Unknown,
+            false,
+            null);
+
+        var first = EligibilityDecisionProjection.Create(decision, Chinese, plannedAttemptAtUtc);
+        var second = EligibilityDecisionProjection.Create(decision, Chinese, plannedAttemptAtUtc);
+        var english = EligibilityDecisionProjection.Create(
+            decision, CultureInfo.GetCultureInfo("en-US"), plannedAttemptAtUtc);
+
+        Assert.Equal(expectedChineseStatus, first.UserFacingStatus);
+        Assert.Equal(expectedEnglishStatus, english.UserFacingStatus);
+        Assert.Equal(first.UserFacingStatus, second.UserFacingStatus);
+        Assert.Equal(first.ReasonText, second.ReasonText);
+        Assert.Equal(first.ConfidenceText, second.ConfidenceText);
+        Assert.Equal(plannedAttemptAtUtc.ToLocalTime().ToString("g", Chinese), first.NextPlannedAttemptText);
+        Assert.Equal(first.NextPlannedAttemptText, second.NextPlannedAttemptText);
+        Assert.Equal(first.Details, second.Details);
+        Assert.Contains(expectedChineseStatus, first.Details);
+        Assert.Contains("下次计划尝试：", first.Details);
+        Assert.Contains("Next planned attempt:", english.Details);
+    }
+
     [Fact]
     public void TrayMenuLabelsResolveFromLocalizationResources()
     {

@@ -34,7 +34,9 @@ public static class AppStatusProjection
 
         return new AppScreenState(
             ProjectAutomation(config),
-            EligibilityDecisionProjection.Create(eligibilityDecision),
+            EligibilityDecisionProjection.Create(
+                eligibilityDecision,
+                nextPlannedAttemptAtUtc: schedulePlan.OneShotTriggerAtUtc),
             new ScheduleView(schedulePlan.OneShotTriggerAtUtc),
             ProjectScheduler(schedulerStatus, config.WakeToRun),
             ProjectCodexEnvironment(codexEnvironment),

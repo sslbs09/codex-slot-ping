@@ -95,7 +95,7 @@ public partial class MainWindow : Window
         TodayRows.ItemsSource = state.TodaySlots.Select(slot => new TodayRow(
             slot.LocalTime.ToString("HH:mm"),
             FormatSlotStatus(slot.Status))).ToArray();
-        EligibilityDetailsText.Text = state.Eligibility.DetailsText;
+        EligibilityDetailsText.Text = state.Eligibility.Details;
         ModelText.Text = state.Automation.Model;
         ReasoningText.Text = UiText.FormatReasoningEffort(state.Automation.ReasoningEffort);
         SchedulerText.Text = UiText.FormatSchedulerState(state.Scheduler.State);

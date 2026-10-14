@@ -9,6 +9,7 @@ using CodexSlotPing.Core.State;
 using CodexSlotPing.Core.Testing;
 using CodexSlotPing.Core.Time;
 using CodexSlotPing.App.ReadModels;
+using System.Globalization;
 
 namespace CodexSlotPing.IntegrationTests.App;
 
@@ -48,6 +49,9 @@ public sealed class AppControllerTests
         Assert.False(string.IsNullOrWhiteSpace(screen.Eligibility.Reason));
         Assert.False(string.IsNullOrWhiteSpace(screen.Eligibility.Confidence));
         Assert.NotNull(screen.Schedule.NextAttemptAtUtc);
+        Assert.Equal(
+            screen.Schedule.NextAttemptAtUtc!.Value.ToLocalTime().ToString("g", CultureInfo.CurrentUICulture),
+            screen.Eligibility.NextPlannedAttemptText);
         Assert.Equal(SchedulerViewState.Disabled, screen.Scheduler.State);
         Assert.Equal("confirmed-success", screen.LatestKnownResult!.ResultCategory);
 

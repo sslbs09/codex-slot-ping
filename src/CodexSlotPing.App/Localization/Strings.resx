@@ -170,6 +170,12 @@
   <data name="Exit.ExitApp" xml:space="preserve"><value>Exit app</value></data>
   <data name="Exit.Cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="Eligibility.None" xml:space="preserve"><value>—</value></data>
+  <data name="Eligibility.UserFacingStatus.Eligible" xml:space="preserve"><value>Current conditions are met; waiting for the planned wake-up</value></data>
+  <data name="Eligibility.UserFacingStatus.NotYetEligible" xml:space="preserve"><value>Waiting for the next planned check</value></data>
+  <data name="Eligibility.UserFacingStatus.Blocked" xml:space="preserve"><value>Automatic scheduling is blocked: {0}</value></data>
+  <data name="Eligibility.UserFacingStatus.Unknown" xml:space="preserve"><value>Current conditions cannot be confirmed</value></data>
+  <data name="Eligibility.UserFacingStatus.ConfirmationRequired" xml:space="preserve"><value>Confirm before starting a Test Now attempt</value></data>
+  <data name="Main.EligibilityExplainabilityDetails" xml:space="preserve"><value>{0}{1}Reason: {2}{1}Confidence: {3}{1}Next planned attempt: {4}{5}</value></data>
   <data name="Eligibility.Status.Eligible" xml:space="preserve"><value>Local policy allows an attempt</value></data>
   <data name="Eligibility.Status.NotYetEligible" xml:space="preserve"><value>Waiting for planned attempt time</value></data>
   <data name="Eligibility.Status.Blocked" xml:space="preserve"><value>Blocked</value></data>

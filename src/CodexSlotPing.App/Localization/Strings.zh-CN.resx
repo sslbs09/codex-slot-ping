@@ -170,6 +170,12 @@
   <data name="Exit.ExitApp" xml:space="preserve"><value>退出应用</value></data>
   <data name="Exit.Cancel" xml:space="preserve"><value>取消</value></data>
   <data name="Eligibility.None" xml:space="preserve"><value>—</value></data>
+  <data name="Eligibility.UserFacingStatus.Eligible" xml:space="preserve"><value>当前条件满足，等待计划唤醒</value></data>
+  <data name="Eligibility.UserFacingStatus.NotYetEligible" xml:space="preserve"><value>等待下一次计划检查</value></data>
+  <data name="Eligibility.UserFacingStatus.Blocked" xml:space="preserve"><value>自动调度被阻止：{0}</value></data>
+  <data name="Eligibility.UserFacingStatus.Unknown" xml:space="preserve"><value>当前无法确认条件</value></data>
+  <data name="Eligibility.UserFacingStatus.ConfirmationRequired" xml:space="preserve"><value>开始 Test Now 前需要确认</value></data>
+  <data name="Main.EligibilityExplainabilityDetails" xml:space="preserve"><value>{0}{1}原因：{2}{1}可信度：{3}{1}下次计划尝试：{4}{5}</value></data>
   <data name="Eligibility.Status.Eligible" xml:space="preserve"><value>本地策略允许尝试</value></data>
   <data name="Eligibility.Status.NotYetEligible" xml:space="preserve"><value>等待下次计划尝试时间</value></data>
   <data name="Eligibility.Status.Blocked" xml:space="preserve"><value>已阻止</value></data>
