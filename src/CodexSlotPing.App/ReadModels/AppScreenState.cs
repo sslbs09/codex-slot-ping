@@ -63,6 +63,8 @@ public sealed record AutomationView(
     bool CaptureRawLogs)
 {
     public bool IsPaused { get; init; }
+
+    public bool IsPauseProtectionActive { get; init; }
 }
 
 public sealed record EligibilityView(
@@ -85,7 +87,10 @@ public sealed record EligibilityView(
     public string Details { get; init; } = DetailsText;
 }
 
-public sealed record ScheduleView(DateTimeOffset? NextAttemptAtUtc);
+public sealed record ScheduleView(DateTimeOffset? NextAttemptAtUtc)
+{
+    public bool IsDeferredUntilResume { get; init; }
+}
 
 public sealed record SchedulerView(
     SchedulerViewState State,

@@ -16,6 +16,7 @@
   <data name="Main.WaitingForSchedule" xml:space="preserve"><value>等待计划任务</value></data>
   <data name="Main.UpdateTimezoneForNext" xml:space="preserve"><value>更新时区锁后才能计算下次计划尝试。</value></data>
   <data name="Main.NoPlannedAttempt" xml:space="preserve"><value>当前没有计划尝试时间。</value></data>
+  <data name="Main.ScheduleRecalculateAfterResume" xml:space="preserve"><value>恢复后重新计算计划。</value></data>
   <data name="Main.AttemptPlannedNow" xml:space="preserve"><value>依据本地调度策略。</value></data>
   <data name="Main.StartsIn" xml:space="preserve"><value>将在 {0} 后开始</value></data>
   <data name="Main.Today" xml:space="preserve"><value>旧固定时段</value></data>
@@ -125,7 +126,8 @@
   <data name="Tray.Settings" xml:space="preserve"><value>设置</value></data>
   <data name="Tray.Tooltip" xml:space="preserve"><value>Codex Slot Ping · {0}</value></data>
   <data name="Tray.Status.SchedulerError" xml:space="preserve"><value>调度器异常</value></data>
-  <data name="Tray.Status.Paused" xml:space="preserve"><value>自动调度已暂停</value></data>
+  <data name="Tray.Status.Paused" xml:space="preserve"><value>自动调度已暂停 · 恢复后重新计算计划</value></data>
+  <data name="Tray.Status.PauseNotPersisted" xml:space="preserve"><value>暂停未持久化 · 自动运行临时保护 · 恢复后重算计划</value></data>
   <data name="Tray.Status.Disabled" xml:space="preserve"><value>自动调度未启用</value></data>
   <data name="Tray.Status.Blocked" xml:space="preserve"><value>自动调度被阻止 · {0}</value></data>
   <data name="Tray.Status.Unknown" xml:space="preserve"><value>当前无法确认条件</value></data>
@@ -142,11 +144,13 @@
   <data name="Automation.State.Paused" xml:space="preserve"><value>已暂停</value></data>
   <data name="Automation.State.Disabled" xml:space="preserve"><value>未启用</value></data>
   <data name="Automation.State.DisabledAndPaused" xml:space="preserve"><value>未启用 · 保留暂停状态</value></data>
+  <data name="Automation.State.PauseNotPersisted" xml:space="preserve"><value>暂停未持久化 · 当前进程临时保护</value></data>
   <data name="Automation.Pause" xml:space="preserve"><value>暂停自动调度</value></data>
   <data name="Automation.Resume" xml:space="preserve"><value>恢复自动调度</value></data>
   <data name="Automation.PausedMessage" xml:space="preserve"><value>自动调度已暂停；仍可在确认后使用立即测试。</value></data>
   <data name="Automation.ResumedMessage" xml:space="preserve"><value>自动调度已恢复，并生成了新计划。</value></data>
   <data name="Automation.ControlSaveFailed" xml:space="preserve"><value>无法保存自动化控制状态。</value></data>
+  <data name="Automation.PauseNotPersistedProtected" xml:space="preserve"><value>暂停未能保存；当前进程会临时阻止新的自动 claim，关闭应用后该保护不会保留。</value></data>
   <data name="Automation.SchedulerSyncFailed" xml:space="preserve"><value>自动化控制状态已保存，但计划任务未能同步。</value></data>
   <data name="Settings.WindowTitle" xml:space="preserve"><value>Codex Slot Ping 设置</value></data>
   <data name="Settings.Header" xml:space="preserve"><value>设置</value></data>

@@ -54,15 +54,18 @@ public sealed class TraySummaryProjectionTests
     [Fact]
     public void Paused_IsIndependentFromDisabledConfiguration()
     {
-        var view = TraySummaryProjection.Create(
-            CreateState(
-                enabled: true,
-                paused: true,
-                schedulerState: SchedulerViewState.Disabled,
-                schedulerIsEnabled: false), Chinese);
+        var state = CreateState(
+            enabled: true,
+            paused: true,
+            schedulerState: SchedulerViewState.Disabled,
+            schedulerIsEnabled: false);
+        var plannedTime = state.Schedule.NextAttemptAtUtc!.Value.ToLocalTime().ToString("HH:mm", Chinese);
+
+        var view = TraySummaryProjection.Create(state, Chinese);
 
         Assert.Equal(TraySummaryStatus.Paused, view.Status);
-        Assert.Equal("自动调度已暂停", view.StatusSummary);
+        Assert.Equal("自动调度已暂停 · 恢复后重新计算计划", view.StatusSummary);
+        Assert.DoesNotContain(plannedTime, view.StatusSummary);
         Assert.Equal("自动化：已暂停", view.Menu.AutomationControlText);
         Assert.Equal("恢复自动调度", view.Menu.PauseResumeText);
         Assert.True(view.Menu.PauseResumeEnabled);
@@ -109,6 +112,28 @@ public sealed class TraySummaryProjectionTests
             Chinese);
 
         Assert.Equal(TraySummaryStatus.Paused, view.Status);
+    }
+
+    [Fact]
+    public void PauseProtectionWithoutPersistence_IsShownAsTemporaryAndHasNoPlanTime()
+    {
+        var state = CreateState(
+            enabled: true,
+            paused: false,
+            pauseProtectionActive: true,
+            schedulerState: SchedulerViewState.Disabled,
+            schedulerIsEnabled: false);
+        var plannedTime = state.Schedule.NextAttemptAtUtc!.Value.ToLocalTime().ToString("HH:mm", Chinese);
+
+        var view = TraySummaryProjection.Create(state, Chinese);
+
+        Assert.Equal(TraySummaryStatus.PauseNotPersisted, view.Status);
+        Assert.Contains("暂停未持久化", view.StatusSummary);
+        Assert.Contains("恢复后重算计划", view.StatusSummary);
+        Assert.DoesNotContain(plannedTime, view.StatusSummary);
+        Assert.Contains("暂停未持久化", view.Menu.AutomationControlText);
+        Assert.Equal("恢复自动调度", view.Menu.PauseResumeText);
+        Assert.True(view.Menu.PauseResumeEnabled);
     }
 
     [Fact]
@@ -175,6 +200,7 @@ public sealed class TraySummaryProjectionTests
         string reason = "本地策略允许进行尝试",
         bool enabled = true,
         bool paused = false,
+        bool? pauseProtectionActive = null,
         SchedulerViewState schedulerState = SchedulerViewState.Enabled,
         bool schedulerIsEnabled = true,
         bool effectiveWakeToRun = true)
@@ -217,7 +243,8 @@ public sealed class TraySummaryProjectionTests
                 10,
                 false)
             {
-                IsPaused = paused
+                IsPaused = paused,
+                IsPauseProtectionActive = pauseProtectionActive ?? paused
             },
             eligibility,
             new ScheduleView(plannedAttempt),

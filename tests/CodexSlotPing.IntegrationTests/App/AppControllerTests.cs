@@ -140,6 +140,77 @@ public sealed class AppControllerTests
     }
 
     [Fact]
+    public async Task PausePersistenceFailure_ReportsTemporaryProtectionAndKeepsTestNowAvailable()
+    {
+        var fixture = new Fixture(
+            AppConfigDefaults.Create() with { Enabled = true },
+            Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath));
+        fixture.ConfigStore.SaveFailure = new IOException("injected config write failure");
+        fixture.Scheduler.FailDisable = true;
+
+        var operation = await fixture.Controller.PauseAutomationAsync(CancellationToken.None);
+        var scheduledClaim = await fixture.ClaimService.TryClaimScheduledAttemptAsync(CancellationToken.None);
+        var testNow = await fixture.ClaimService.TryClaimTestNowAsync(
+            "temporary-pause-test-now", userConfirmed: true, CancellationToken.None);
+        var screen = await fixture.Controller.RefreshAsync(CancellationToken.None);
+        var tray = TraySummaryProjection.Create(screen, CultureInfo.GetCultureInfo("zh-CN"));
+
+        Assert.False(operation.Succeeded);
+        Assert.Equal("automation-pause-not-persisted-protected", operation.DiagnosticCategory);
+        Assert.False(fixture.ConfigStore.Config.IsPaused);
+        Assert.False(screen.Automation.IsPaused);
+        Assert.True(screen.Automation.IsPauseProtectionActive);
+        Assert.Equal(SlotClaimBlockReason.AutomationPaused, scheduledClaim.BlockReason);
+        Assert.True(testNow.IsClaimed);
+        Assert.Null(screen.Schedule.NextAttemptAtUtc);
+        Assert.True(screen.Schedule.IsDeferredUntilResume);
+        Assert.Contains("恢复后重新计算计划", screen.Eligibility.Details);
+        Assert.Contains("暂停未持久化", tray.Menu.AutomationControlText);
+    }
+
+    [Fact]
+    public async Task ResumeAutomation_ClearsTemporaryProtectionAfterFreshPlanIsWritten()
+    {
+        var fixture = new Fixture(
+            AppConfigDefaults.Create() with { Enabled = true },
+            Status(SchedulerState.ON, exists: true, owned: true, enabled: true, RunnerPath));
+        fixture.ConfigStore.SaveFailure = new IOException("injected config write failure");
+
+        var pause = await fixture.Controller.PauseAutomationAsync(CancellationToken.None);
+        var protectedClaim = await fixture.ClaimService.TryClaimScheduledAttemptAsync(CancellationToken.None);
+        fixture.ConfigStore.SaveFailure = null;
+
+        var resume = await fixture.Controller.ResumeAutomationAsync(CancellationToken.None);
+        var resumedClaim = await fixture.ClaimService.TryClaimScheduledAttemptAsync(CancellationToken.None);
+
+        Assert.False(pause.Succeeded);
+        Assert.Equal(SlotClaimBlockReason.AutomationPaused, protectedClaim.BlockReason);
+        Assert.True(resume.Succeeded);
+        Assert.Equal(2, fixture.Scheduler.Definitions.Count);
+        Assert.False(fixture.Scheduler.Definitions[0].Enabled);
+        Assert.True(fixture.Scheduler.Definitions[1].Enabled);
+        Assert.True(resumedClaim.IsClaimed);
+    }
+
+    [Fact]
+    public async Task Refresh_WhenPersistentlyPaused_HidesPlanAndExplainsRecalculationOnResume()
+    {
+        var fixture = new Fixture(
+            AppConfigDefaults.Create() with { Enabled = true, IsPaused = true },
+            Status(SchedulerState.OWNED_DISABLED, exists: true, owned: true, enabled: false, RunnerPath));
+
+        var screen = await fixture.Controller.RefreshAsync(CancellationToken.None);
+        var tray = TraySummaryProjection.Create(screen, CultureInfo.GetCultureInfo("zh-CN"));
+
+        Assert.Null(screen.Schedule.NextAttemptAtUtc);
+        Assert.True(screen.Automation.IsPaused);
+        Assert.True(screen.Automation.IsPauseProtectionActive);
+        Assert.True(screen.Schedule.IsDeferredUntilResume);
+        Assert.Contains("恢复后重新计算计划", screen.Eligibility.Details);
+        Assert.Equal("自动调度已暂停 · 恢复后重新计算计划", tray.StatusSummary);
+    }
+
+    [Fact]
     public async Task ResumeAutomation_WritesFreshPlanBeforeClearingPause()
     {
         var oldTriggerAt = Now.AddHours(1);
@@ -488,9 +559,15 @@ public sealed class AppControllerTests
     {
         public AppConfig Config { get; private set; } = config;
         public int SaveCount { get; private set; }
+        public Exception? SaveFailure { get; set; }
         public Task<AppConfig> LoadOrCreateAsync(CancellationToken cancellationToken) => Task.FromResult(Config);
         public Task SaveAsync(AppConfig config, CancellationToken cancellationToken)
         {
+            if (SaveFailure is not null)
+            {
+                return Task.FromException(SaveFailure);
+            }
+
             Config = config;
             SaveCount++;
             return Task.CompletedTask;

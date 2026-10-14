@@ -81,6 +81,7 @@ public sealed class AppController
         var configStore = new JsonConfigStore(atomicFile, paths.ConfigPath);
         var stateStore = new JsonStateStore(atomicFile, paths.StatePath);
         var stateMutex = new NamedStateMutex();
+        var pauseProtection = AutomationPauseProtection.CreateForCurrentSession();
         var environmentDetector = new CodexEnvironmentDetector(new CodexExecutableResolver());
         var claimService = new FormalSlotClaimService(
             clock,
@@ -89,7 +90,8 @@ public sealed class AppController
             stateStore,
             stateMutex,
             new SlotAdmissionEvaluator(timeZoneProvider),
-            new EligibilityEvaluator());
+            new EligibilityEvaluator(),
+            pauseProtection);
         var runnerPath = RunnerPathResolver.Resolve(appBaseDirectory ?? AppContext.BaseDirectory);
         var testNowRunner = new RunnerProcessClient(runnerPath);
 
@@ -115,6 +117,7 @@ public sealed class AppController
         var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
         var persistentState = await _stateStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         var currentTimeZoneId = _timeZoneProvider.CurrentWindowsTimeZoneId;
+        var pauseProtectionActive = config.IsPaused || _claimService.IsPauseProtectionActive;
         var scheduling = await _schedulingCoordinator.EvaluateAsync(cancellationToken).ConfigureAwait(false);
         var now = scheduling.EvaluatedAtUtc;
         var eligibilityDecision = scheduling.EligibilityDecision;
@@ -127,7 +130,8 @@ public sealed class AppController
         var scheduler = _schedulerHealthEvaluator.Evaluate(rawScheduler, _runnerPath, config.TimeZone,
             currentTimeZoneId, scheduling.Plan);
         scheduler = await ReconcilePlanDriftAsync(
-            config, scheduling.Plan, scheduler, currentTimeZoneId, cancellationToken).ConfigureAwait(false);
+            config, scheduling.Plan, scheduler, currentTimeZoneId, pauseProtectionActive, cancellationToken)
+            .ConfigureAwait(false);
         var nextSlot = _nextSlotCalculator.GetNext(config, persistentState, now, currentTimeZoneId);
         var todaySlots = BuildTodaySlots(config, persistentState, now, currentTimeZoneId);
 
@@ -142,7 +146,8 @@ public sealed class AppController
             todaySlots,
             now,
             currentTimeZoneId,
-            _logsDirectory);
+            _logsDirectory,
+            pauseProtectionActive);
     }
 
     public async Task<ConfigSaveResult> SaveSettingsAsync(
@@ -176,6 +181,7 @@ public sealed class AppController
 
         var currentControl = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
         var savedConfig = validation.NormalizedConfig with { IsPaused = currentControl.IsPaused };
+        var pauseProtectionActive = savedConfig.IsPaused || _claimService.IsPauseProtectionActive;
         SchedulerStatus status;
         try
         {
@@ -203,7 +209,7 @@ public sealed class AppController
                 AppStatusProjection.ProjectScheduler(status, candidate.WakeToRun), false);
         }
 
-        var configToSave = status.Exists && status.IsOwned && !savedConfig.IsPaused
+        var configToSave = status.Exists && status.IsOwned && !pauseProtectionActive
             ? savedConfig with { Enabled = status.IsEnabled }
             : savedConfig;
         try
@@ -229,7 +235,7 @@ public sealed class AppController
         var scheduling = await _schedulingCoordinator.EvaluateAsync(cancellationToken).ConfigureAwait(false);
         var definition = CreateDefinition(
             configToSave,
-            enabled: status.IsEnabled && !configToSave.IsPaused,
+            enabled: status.IsEnabled && !pauseProtectionActive,
             scheduling.Plan);
         SchedulerOperationResult update;
         try
@@ -299,7 +305,7 @@ public sealed class AppController
 
         var installConfig = validation.NormalizedConfig with { Enabled = true };
         var scheduling = await _schedulingCoordinator.EvaluateAsync(cancellationToken).ConfigureAwait(false);
-        var shouldEnableScheduler = !installConfig.IsPaused;
+        var shouldEnableScheduler = !installConfig.IsPaused && !_claimService.IsPauseProtectionActive;
         var definition = CreateDefinition(installConfig, shouldEnableScheduler, scheduling.Plan);
         SchedulerOperationResult operation;
         try
@@ -336,12 +342,25 @@ public sealed class AppController
     {
         // Persist through Core's claim mutex before touching Task Scheduler. A trigger
         // that races with the scheduler update will then be rejected by the Core gate.
-        if (!await _claimService.SetAutomationPausedAsync(true, cancellationToken).ConfigureAwait(false))
+        // Core also keeps an in-process fail-closed gate if this persistence attempt fails.
+        var pausePersisted = await _claimService.SetAutomationPausedAsync(true, cancellationToken)
+            .ConfigureAwait(false);
+
+        AppConfig config;
+        try
         {
-            return new SchedulerOperationView(false, "automation-control-save-failed");
+            config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return PausePersistenceResult(pausePersisted,
+                new SchedulerOperationView(false, "scheduler-unavailable"));
         }
 
-        var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
         SchedulerStatus status;
         try
         {
@@ -357,19 +376,22 @@ public sealed class AppController
         }
         catch (Exception)
         {
-            return new SchedulerOperationView(false, "scheduler-unavailable");
+            return PausePersistenceResult(pausePersisted,
+                new SchedulerOperationView(false, "scheduler-unavailable"));
         }
 
         if (!status.Exists || !status.IsEnabled)
         {
-            return status.State == SchedulerState.ERROR
+            var statusResult = status.State == SchedulerState.ERROR
                 ? new SchedulerOperationView(false, status.DiagnosticCategory ?? "scheduler-unavailable")
                 : new SchedulerOperationView(true, null);
+            return PausePersistenceResult(pausePersisted, statusResult);
         }
 
         if (!status.IsOwned)
         {
-            return new SchedulerOperationView(false, "task-ownership-conflict");
+            return PausePersistenceResult(pausePersisted,
+                new SchedulerOperationView(false, "task-ownership-conflict"));
         }
 
         SchedulerOperationResult operation;
@@ -384,12 +406,13 @@ public sealed class AppController
         }
         catch (Exception)
         {
-            return new SchedulerOperationView(false, "scheduler-unavailable");
+            return PausePersistenceResult(pausePersisted,
+                new SchedulerOperationView(false, "scheduler-unavailable"));
         }
 
         if (!operation.Succeeded)
         {
-            return ProjectSchedulerOperation(operation);
+            return PausePersistenceResult(pausePersisted, ProjectSchedulerOperation(operation));
         }
 
         try
@@ -399,9 +422,10 @@ public sealed class AppController
                 _runnerPath,
                 config.TimeZone,
                 cancellationToken).ConfigureAwait(false);
-            return readback.State != SchedulerState.ERROR && !readback.IsEnabled
+            var result = readback.State != SchedulerState.ERROR && !readback.IsEnabled
                 ? new SchedulerOperationView(true, null)
                 : new SchedulerOperationView(false, readback.DiagnosticCategory ?? "scheduler-readback-failed");
+            return PausePersistenceResult(pausePersisted, result);
         }
         catch (OperationCanceledException)
         {
@@ -409,9 +433,17 @@ public sealed class AppController
         }
         catch (Exception)
         {
-            return new SchedulerOperationView(false, "scheduler-readback-failed");
+            return PausePersistenceResult(pausePersisted,
+                new SchedulerOperationView(false, "scheduler-readback-failed"));
         }
     }
+
+    private static SchedulerOperationView PausePersistenceResult(
+        bool persisted,
+        SchedulerOperationView schedulerOperation) =>
+        persisted
+            ? schedulerOperation
+            : new SchedulerOperationView(false, "automation-pause-not-persisted-protected");
 
     public Task<SchedulerOperationView> ResumeAutomationAsync(CancellationToken cancellationToken) =>
         ExecuteAutomationOperationAsync(() => ResumeAutomationCoreAsync(cancellationToken), cancellationToken);
@@ -419,7 +451,8 @@ public sealed class AppController
     private async Task<SchedulerOperationView> ResumeAutomationCoreAsync(CancellationToken cancellationToken)
     {
         var config = await _configStore.LoadOrCreateAsync(cancellationToken).ConfigureAwait(false);
-        if (!config.IsPaused)
+        var pauseProtectionActive = config.IsPaused || _claimService.IsPauseProtectionActive;
+        if (!pauseProtectionActive)
         {
             return new SchedulerOperationView(true, null);
         }
@@ -706,7 +739,8 @@ public sealed class AppController
                 _runnerPath,
                 currentTimeZoneId,
                 userConfirmed,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                pauseProtectionActive: _claimService.IsPauseProtectionActive).ConfigureAwait(false);
             return ProjectTimezoneUpdate(result);
         }
 
@@ -785,13 +819,14 @@ public sealed class AppController
         SchedulePlan plan,
         SchedulerStatus status,
         string currentWindowsTimeZoneId,
+        bool pauseProtectionActive,
         CancellationToken cancellationToken)
     {
         string[] scheduleMismatchCodes = [
             "trigger-plan-mismatch",
             "trigger-contract-mismatch",
             "start-when-available-disabled"];
-        if (config.IsPaused && status.Exists && status.IsOwned && status.IsEnabled)
+        if (pauseProtectionActive && status.Exists && status.IsOwned && status.IsEnabled)
         {
             try
             {
@@ -841,7 +876,8 @@ public sealed class AppController
         try
         {
             var update = await _schedulerGateway.InstallOrUpdateAsync(
-                CreateDefinition(config, status.IsEnabled && !config.IsPaused, plan), cancellationToken).ConfigureAwait(false);
+                CreateDefinition(config, status.IsEnabled && !pauseProtectionActive, plan), cancellationToken)
+                .ConfigureAwait(false);
             if (!update.Succeeded)
             {
                 return update.Status ?? status with

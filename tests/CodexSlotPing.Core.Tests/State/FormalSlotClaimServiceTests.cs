@@ -96,6 +96,73 @@ public sealed class FormalSlotClaimServiceTests
     }
 
     [Fact]
+    public async Task PauseConfigWriteFailure_ProtectsConcurrentScheduledClaimsButAllowsTestNow()
+    {
+        var now = AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(7, 1));
+        var fixture = CreateFixture(now);
+        fixture.ConfigStore.SaveFailure = new IOException("injected config write failure");
+        fixture.ConfigStore.BlockSaveFailure = true;
+
+        var pauseTask = fixture.Service.SetAutomationPausedAsync(true, CancellationToken.None);
+        Assert.True(await Task.Run(() => fixture.ConfigStore.SaveStarted.Wait(TimeSpan.FromSeconds(2))));
+
+        var scheduledTask = fixture.Service.TryClaimScheduledAttemptAsync(CancellationToken.None);
+        Assert.True(await Task.Run(() => fixture.Mutex.SecondAcquireAttempted.Wait(TimeSpan.FromSeconds(2))));
+        fixture.ConfigStore.AllowSaveFailure.Set();
+
+        var pausePersisted = await pauseTask;
+        var scheduled = await scheduledTask;
+        var legacyScheduled = await fixture.Service.TryClaimCurrentSlotAsync(CancellationToken.None);
+
+        Assert.False(pausePersisted);
+        Assert.Equal(SlotClaimKind.Blocked, scheduled.Kind);
+        Assert.Equal(SlotClaimBlockReason.AutomationPaused, scheduled.BlockReason);
+        Assert.Equal(SlotClaimKind.Blocked, legacyScheduled.Kind);
+        Assert.Equal(SlotClaimBlockReason.AutomationPaused, legacyScheduled.BlockReason);
+
+        var testNowFixture = CreateFixture(now);
+        testNowFixture.ConfigStore.SaveFailure = new IOException("injected config write failure");
+        Assert.False(await testNowFixture.Service.SetAutomationPausedAsync(true, CancellationToken.None));
+        var testNow = await testNowFixture.Service.TryClaimTestNowAsync(
+            "pause-write-failure-test-now", userConfirmed: true, CancellationToken.None);
+        Assert.True(testNow.IsClaimed);
+    }
+
+    [Fact]
+    public async Task PauseConfigWriteFailure_ProtectsClaimsInSeparateRunnerService()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var now = AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(7, 1));
+        var eventName = $@"Local\CodexSlotPing.Tests.{Guid.NewGuid():N}";
+        using var appProtection = new AutomationPauseProtection(eventName);
+        using var runnerProtection = new AutomationPauseProtection(eventName);
+        var fixture = CreateFixture(now, pauseProtection: appProtection);
+        var runner = new FormalSlotClaimService(
+            fixture.Clock,
+            new FixedTimeZoneProvider(EasternTimeZoneId, EasternTimeZone),
+            fixture.ConfigStore,
+            fixture.StateStore,
+            fixture.Mutex,
+            new SlotAdmissionEvaluator(new FixedTimeZoneProvider(EasternTimeZoneId, EasternTimeZone)),
+            new EligibilityEvaluator(),
+            runnerProtection);
+        fixture.ConfigStore.SaveFailure = new IOException("injected config write failure");
+
+        Assert.False(await fixture.Service.SetAutomationPausedAsync(true, CancellationToken.None));
+
+        var scheduled = await runner.TryClaimScheduledAttemptAsync(CancellationToken.None);
+        var testNow = await runner.TryClaimTestNowAsync(
+            "separate-runner-test-now", userConfirmed: true, CancellationToken.None);
+
+        Assert.Equal(SlotClaimBlockReason.AutomationPaused, scheduled.BlockReason);
+        Assert.True(testNow.IsClaimed);
+    }
+
+    [Fact]
     public async Task ConcurrentScheduledAttemptClaims_HaveOneWinner()
     {
         var fixture = CreateFixture(AtLocal(new DateOnly(2026, 1, 15), new TimeOnly(13, 37, 12)));
@@ -486,7 +553,8 @@ public sealed class FormalSlotClaimServiceTests
         DateTimeOffset nowUtc,
         AppConfig? config = null,
         StateDocument? state = null,
-        bool mutexAvailable = true)
+        bool mutexAvailable = true,
+        AutomationPauseProtection? pauseProtection = null)
     {
         var clock = new FixedClock(nowUtc);
         var zoneProvider = new FixedTimeZoneProvider(EasternTimeZoneId, EasternTimeZone);
@@ -502,7 +570,8 @@ public sealed class FormalSlotClaimServiceTests
             stateStore,
             mutex,
             new SlotAdmissionEvaluator(zoneProvider),
-            new EligibilityEvaluator());
+            new EligibilityEvaluator(),
+            pauseProtection);
         return new ClaimFixture(service, clock, configStore, stateStore, mutex);
     }
 
@@ -557,6 +626,14 @@ public sealed class FormalSlotClaimServiceTests
     {
         public AppConfig Config { get; set; } = config;
 
+        public Exception? SaveFailure { get; set; }
+
+        public bool BlockSaveFailure { get; set; }
+
+        public ManualResetEventSlim SaveStarted { get; } = new();
+
+        public ManualResetEventSlim AllowSaveFailure { get; } = new();
+
         public bool SaveObservedMutexHeld { get; private set; }
 
         public int LoadCount { get; private set; }
@@ -570,6 +647,17 @@ public sealed class FormalSlotClaimServiceTests
         public Task SaveAsync(AppConfig config, CancellationToken cancellationToken)
         {
             SaveObservedMutexHeld |= isMutexHeld();
+            if (SaveFailure is not null)
+            {
+                SaveStarted.Set();
+                if (BlockSaveFailure && !AllowSaveFailure.Wait(TimeSpan.FromSeconds(5)))
+                {
+                    return Task.FromException(new TimeoutException("Config write failure barrier timed out."));
+                }
+
+                return Task.FromException(SaveFailure);
+            }
+
             Config = config;
             return Task.CompletedTask;
         }
@@ -614,11 +702,19 @@ public sealed class FormalSlotClaimServiceTests
     private sealed class RecordingStateMutex(bool available) : IStateMutex
     {
         private readonly object _gate = new();
+        private int _acquireAttemptCount;
 
         public bool IsHeld { get; private set; }
 
+        public ManualResetEventSlim SecondAcquireAttempted { get; } = new();
+
         public StateMutexLease? TryAcquire(TimeSpan timeout)
         {
+            if (Interlocked.Increment(ref _acquireAttemptCount) >= 2)
+            {
+                SecondAcquireAttempted.Set();
+            }
+
             if (!available || !Monitor.TryEnter(_gate, timeout))
             {
                 return null;

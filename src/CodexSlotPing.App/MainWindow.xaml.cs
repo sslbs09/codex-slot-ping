@@ -77,7 +77,12 @@ public partial class MainWindow : Window
         };
         VersionText.Text = state.Codex.CliVersion ?? UiText.Get("Main.CliVersionUnavailable");
 
-        if (state.Schedule.NextAttemptAtUtc is not { } nextAttemptUtc)
+        if (state.Schedule.IsDeferredUntilResume)
+        {
+            NextSlotTimeText.Text = "—";
+            NextSlotCountdownText.Text = UiText.Get("Main.ScheduleRecalculateAfterResume");
+        }
+        else if (state.Schedule.NextAttemptAtUtc is not { } nextAttemptUtc)
         {
             NextSlotTimeText.Text = "—";
             NextSlotCountdownText.Text = state.Scheduler.State == SchedulerViewState.TimezoneChanged
@@ -100,11 +105,13 @@ public partial class MainWindow : Window
         ReasoningText.Text = UiText.FormatReasoningEffort(state.Automation.ReasoningEffort);
         SchedulerText.Text = UiText.FormatSchedulerState(state.Scheduler.State);
         AutomationStatusText.Text = UiText.FormatAutomationControlState(
-            state.Automation.Enabled, state.Automation.IsPaused);
-        AutomationPauseButton.Content = UiText.Get(state.Automation.IsPaused
+            state.Automation.Enabled,
+            state.Automation.IsPaused,
+            state.Automation.IsPauseProtectionActive);
+        AutomationPauseButton.Content = UiText.Get(state.Automation.IsPauseProtectionActive
             ? "Automation.Resume"
             : "Automation.Pause");
-        AutomationPauseButton.IsEnabled = state.Automation.Enabled || state.Automation.IsPaused;
+        AutomationPauseButton.IsEnabled = state.Automation.Enabled || state.Automation.IsPauseProtectionActive;
         WakeText.Text = UiText.Get(state.Scheduler.EffectiveWakeToRun ? "State.Enabled" : "State.Disabled");
 
         var messages = new List<string>();
@@ -161,7 +168,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var wasPaused = _screenState.Automation.IsPaused;
+        var wasPaused = _screenState.Automation.IsPauseProtectionActive;
         try
         {
             var operation = wasPaused
@@ -177,10 +184,16 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var message = operation.DiagnosticCategory == "automation-control-save-failed"
-                ? UiText.Get("Automation.ControlSaveFailed")
-                : UiText.Get("Automation.SchedulerSyncFailed");
-            StatusMessageText.Text = $"{message} {UiText.FormatDiagnostic(operation.DiagnosticCategory ?? string.Empty)}";
+            var message = operation.DiagnosticCategory switch
+            {
+                "automation-pause-not-persisted-protected" =>
+                    UiText.Get("Automation.PauseNotPersistedProtected"),
+                "automation-control-save-failed" => UiText.Get("Automation.ControlSaveFailed"),
+                _ => UiText.Get("Automation.SchedulerSyncFailed")
+            };
+            StatusMessageText.Text = operation.DiagnosticCategory == "automation-pause-not-persisted-protected"
+                ? message
+                : $"{message} {UiText.FormatDiagnostic(operation.DiagnosticCategory ?? string.Empty)}";
             if (showFailureDialog)
             {
                 ShowTrayMessage(StatusMessageText.Text);

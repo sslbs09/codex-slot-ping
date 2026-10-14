@@ -114,7 +114,9 @@ public partial class SettingsWindow : Window
 
         await RunSchedulerOperationAsync(
             _controller.InstallOrUpdateSchedulerAsync,
-            _screenState.Automation.IsPaused ? "Settings.InstallPausedSuccess" : "Settings.InstallSuccess");
+            _screenState.Automation.IsPauseProtectionActive
+                ? "Settings.InstallPausedSuccess"
+                : "Settings.InstallSuccess");
     }
 
     private async void Disable_Click(object sender, RoutedEventArgs e)
@@ -139,7 +141,7 @@ public partial class SettingsWindow : Window
 
     private async void AutomationPause_Click(object sender, RoutedEventArgs e)
     {
-        var wasPaused = _screenState.Automation.IsPaused;
+        var wasPaused = _screenState.Automation.IsPauseProtectionActive;
         try
         {
             var result = wasPaused
@@ -255,11 +257,14 @@ public partial class SettingsWindow : Window
     private void RenderAutomationControl()
     {
         AutomationStatusText.Text = UiText.FormatAutomationControlState(
-            _screenState.Automation.Enabled, _screenState.Automation.IsPaused);
-        AutomationPauseButton.Content = UiText.Get(_screenState.Automation.IsPaused
+            _screenState.Automation.Enabled,
+            _screenState.Automation.IsPaused,
+            _screenState.Automation.IsPauseProtectionActive);
+        AutomationPauseButton.Content = UiText.Get(_screenState.Automation.IsPauseProtectionActive
             ? "Automation.Resume"
             : "Automation.Pause");
-        AutomationPauseButton.IsEnabled = _screenState.Automation.Enabled || _screenState.Automation.IsPaused;
+        AutomationPauseButton.IsEnabled =
+            _screenState.Automation.Enabled || _screenState.Automation.IsPauseProtectionActive;
     }
 
     private void RenderSchedulerState()

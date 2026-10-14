@@ -22,7 +22,8 @@ public static class AppStatusProjection
         IReadOnlyList<TodaySlotState> todaySlots,
         DateTimeOffset nowUtc,
         string currentWindowsTimeZoneId,
-        string logsDirectory)
+        string logsDirectory,
+        bool pauseProtectionActive = false)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(state);
@@ -32,8 +33,13 @@ public static class AppStatusProjection
         ArgumentNullException.ThrowIfNull(codexEnvironment);
         ArgumentNullException.ThrowIfNull(todaySlots);
 
+        var isPauseProtectionActive = config.IsPaused || pauseProtectionActive;
+        var automation = ProjectAutomation(config) with
+        {
+            IsPauseProtectionActive = isPauseProtectionActive
+        };
         var scheduler = ProjectScheduler(schedulerStatus, config.WakeToRun);
-        if (config.IsPaused && scheduler.IsEnabled)
+        if (isPauseProtectionActive && scheduler.IsEnabled)
         {
             scheduler = scheduler with
             {
@@ -43,11 +49,15 @@ public static class AppStatusProjection
         }
 
         return new AppScreenState(
-            ProjectAutomation(config),
+            automation,
             EligibilityDecisionProjection.Create(
                 eligibilityDecision,
-                nextPlannedAttemptAtUtc: schedulePlan.OneShotTriggerAtUtc),
-            new ScheduleView(schedulePlan.OneShotTriggerAtUtc),
+                nextPlannedAttemptAtUtc: isPauseProtectionActive ? null : schedulePlan.OneShotTriggerAtUtc,
+                scheduleDeferredUntilResume: isPauseProtectionActive),
+            new ScheduleView(isPauseProtectionActive ? null : schedulePlan.OneShotTriggerAtUtc)
+            {
+                IsDeferredUntilResume = isPauseProtectionActive
+            },
             scheduler,
             ProjectCodexEnvironment(codexEnvironment),
             nextSlot is null ? null : new NextSlotView(nextSlot.Position, nextSlot.StartUtc),
@@ -72,7 +82,8 @@ public static class AppStatusProjection
             config.StrictSlotWindowMinutes,
             config.CaptureRawLogs)
         {
-            IsPaused = config.IsPaused
+            IsPaused = config.IsPaused,
+            IsPauseProtectionActive = config.IsPaused
         };
     }
 

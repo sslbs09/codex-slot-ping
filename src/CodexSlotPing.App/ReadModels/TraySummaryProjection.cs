@@ -7,6 +7,7 @@ public enum TraySummaryStatus
 {
     SchedulerError,
     Paused,
+    PauseNotPersisted,
     Disabled,
     Blocked,
     Unknown,
@@ -56,9 +57,12 @@ public static class TraySummaryProjection
                     selectedCulture,
                     UiText.Get("Tray.AutomationControl", selectedCulture),
                     UiText.FormatAutomationControlState(
-                        state.Automation.Enabled, state.Automation.IsPaused, selectedCulture)),
-                UiText.Get(state.Automation.IsPaused ? "Automation.Resume" : "Automation.Pause", selectedCulture),
-                state.Automation.Enabled || state.Automation.IsPaused,
+                        state.Automation.Enabled,
+                        state.Automation.IsPaused,
+                        state.Automation.IsPauseProtectionActive,
+                        selectedCulture)),
+                UiText.Get(state.Automation.IsPauseProtectionActive ? "Automation.Resume" : "Automation.Pause", selectedCulture),
+                state.Automation.Enabled || state.Automation.IsPauseProtectionActive,
                 UiText.FormatTraySchedulerState(state.Scheduler.State, selectedCulture),
                 state.Scheduler.EffectiveWakeToRun));
     }
@@ -72,9 +76,11 @@ public static class TraySummaryProjection
             return (TraySummaryStatus.SchedulerError, UiText.Get("Tray.Status.SchedulerError", culture));
         }
 
-        if (state.Automation.IsPaused)
+        if (state.Automation.IsPauseProtectionActive)
         {
-            return (TraySummaryStatus.Paused, UiText.Get("Tray.Status.Paused", culture));
+            return state.Automation.IsPaused
+                ? (TraySummaryStatus.Paused, UiText.Get("Tray.Status.Paused", culture))
+                : (TraySummaryStatus.PauseNotPersisted, UiText.Get("Tray.Status.PauseNotPersisted", culture));
         }
 
         if (!state.Automation.Enabled)
@@ -116,7 +122,7 @@ public static class TraySummaryProjection
             return true;
         }
 
-        if (state.Automation.IsPaused)
+        if (state.Automation.IsPauseProtectionActive)
         {
             return state.Scheduler.State is not SchedulerViewState.Disabled
                 and not SchedulerViewState.NotInstalled || state.Scheduler.IsEnabled;

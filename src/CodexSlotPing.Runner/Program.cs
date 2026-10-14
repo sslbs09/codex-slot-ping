@@ -46,6 +46,7 @@ internal static class Program
             var configStore = new JsonConfigStore(atomicFile, paths.ConfigPath);
             var stateStore = new JsonStateStore(atomicFile, paths.StatePath);
             using var mutex = new NamedStateMutex();
+            using var pauseProtection = AutomationPauseProtection.CreateForCurrentSession();
             var timeZoneProvider = new WindowsTimeZoneProvider();
             var schedulerGateway = new WindowsTaskSchedulerGateway();
             var environmentDetector = new CodexEnvironmentDetector(new CodexExecutableResolver());
@@ -60,7 +61,8 @@ internal static class Program
                 stateStore,
                 mutex,
                 new SlotAdmissionEvaluator(timeZoneProvider),
-                new EligibilityEvaluator());
+                new EligibilityEvaluator(),
+                pauseProtection);
 
             if (options.Mode == RunnerMode.TestNow)
             {

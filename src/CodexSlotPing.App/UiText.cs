@@ -69,13 +69,21 @@ public static class UiText
     public static string FormatAutomationControlState(
         bool enabled,
         bool isPaused,
+        CultureInfo? culture = null) =>
+        FormatAutomationControlState(enabled, isPaused, isPaused, culture);
+
+    public static string FormatAutomationControlState(
+        bool enabled,
+        bool isPaused,
+        bool pauseProtectionActive,
         CultureInfo? culture = null)
     {
-        var key = (enabled, isPaused) switch
+        var key = (enabled, isPaused, pauseProtectionActive) switch
         {
-            (true, false) => "Automation.State.Enabled",
-            (true, true) => "Automation.State.Paused",
-            (false, true) => "Automation.State.DisabledAndPaused",
+            (_, true, _) when !enabled => "Automation.State.DisabledAndPaused",
+            (_, true, _) => "Automation.State.Paused",
+            (true, false, true) => "Automation.State.PauseNotPersisted",
+            (true, false, false) => "Automation.State.Enabled",
             _ => "Automation.State.Disabled"
         };
         return Get(key, culture ?? CultureInfo.CurrentUICulture);
@@ -180,6 +188,7 @@ public static class UiText
             "runner-action-mismatch" or "task-path-argument-mismatch" or "working-directory-mismatch" => "Diagnostic.SchedulerPathChanged",
             "owned-task-required" => "Diagnostic.OwnedTaskRequired",
             "timezone-config-save-failed" => "Diagnostic.TimezoneConfigSaveFailed",
+            "automation-pause-not-persisted-protected" => "Automation.PauseNotPersistedProtected",
             "stream-error" => "Diagnostic.StreamError",
             "process-start-failed" => "Diagnostic.ProcessStartFailed",
             "cancelled-after-process-start" => "Diagnostic.Cancelled",

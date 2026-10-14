@@ -26,7 +26,8 @@ public sealed class TimezoneUpdateService
         string currentRunnerPath,
         string currentWindowsTimeZoneId,
         bool userConfirmed,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool pauseProtectionActive = false)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentException.ThrowIfNullOrWhiteSpace(currentRunnerPath);
@@ -75,7 +76,7 @@ public sealed class TimezoneUpdateService
             currentWindowsTimeZoneId,
             plan,
             config.WakeToRun,
-            Enabled: currentStatus.IsEnabled && !config.IsPaused);
+            Enabled: currentStatus.IsEnabled && !config.IsPaused && !pauseProtectionActive);
 
         SchedulerOperationResult schedulerUpdate;
         try

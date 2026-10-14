@@ -18,6 +18,7 @@ public sealed class FormalSlotClaimService
     private readonly IStateMutex _stateMutex;
     private readonly SlotAdmissionEvaluator _slotAdmissionEvaluator;
     private readonly IEligibilityEvaluator _eligibilityEvaluator;
+    private readonly AutomationPauseProtection _pauseProtection;
 
     public FormalSlotClaimService(
         IClock clock,
@@ -26,7 +27,8 @@ public sealed class FormalSlotClaimService
         IStateStore stateStore,
         IStateMutex stateMutex,
         SlotAdmissionEvaluator slotAdmissionEvaluator,
-        IEligibilityEvaluator eligibilityEvaluator)
+        IEligibilityEvaluator eligibilityEvaluator,
+        AutomationPauseProtection? pauseProtection = null)
     {
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _timeZoneProvider = timeZoneProvider ?? throw new ArgumentNullException(nameof(timeZoneProvider));
@@ -35,7 +37,10 @@ public sealed class FormalSlotClaimService
         _stateMutex = stateMutex ?? throw new ArgumentNullException(nameof(stateMutex));
         _slotAdmissionEvaluator = slotAdmissionEvaluator ?? throw new ArgumentNullException(nameof(slotAdmissionEvaluator));
         _eligibilityEvaluator = eligibilityEvaluator ?? throw new ArgumentNullException(nameof(eligibilityEvaluator));
+        _pauseProtection = pauseProtection ?? new AutomationPauseProtection();
     }
+
+    public bool IsPauseProtectionActive => _pauseProtection.IsActive;
 
     public Task<SlotClaimResult> TryClaimCurrentSlotAsync(CancellationToken cancellationToken)
     {
@@ -100,6 +105,12 @@ public sealed class FormalSlotClaimService
 
     private bool SetAutomationPaused(bool isPaused, CancellationToken cancellationToken)
     {
+        if (isPaused)
+        {
+            // Fail closed before persistence. The tray process and scheduled runner share this signal.
+            _pauseProtection.Activate();
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
         StateMutexLease? lease;
         try
@@ -123,18 +134,28 @@ public sealed class FormalSlotClaimService
                 var config = _configStore.LoadOrCreateAsync(cancellationToken).GetAwaiter().GetResult();
                 if (config.IsPaused == isPaused)
                 {
+                    if (!isPaused)
+                    {
+                        _pauseProtection.Deactivate();
+                    }
+
                     return true;
                 }
 
                 _configStore.SaveAsync(config with { IsPaused = isPaused }, cancellationToken)
                     .GetAwaiter().GetResult();
+                if (!isPaused)
+                {
+                    _pauseProtection.Deactivate();
+                }
+
                 return true;
             }
             catch (OperationCanceledException)
             {
                 throw;
             }
-            catch (Exception exception) when (exception is InvalidDataException or IOException or JsonException or UnauthorizedAccessException)
+            catch (Exception)
             {
                 return false;
             }
@@ -395,7 +416,7 @@ public sealed class FormalSlotClaimService
                 return Blocked(SlotClaimBlockReason.ConfigurationDisabled);
             }
 
-            if (config.IsPaused)
+            if (config.IsPaused || IsPauseProtectionActive)
             {
                 return Blocked(SlotClaimBlockReason.AutomationPaused);
             }
@@ -602,7 +623,7 @@ public sealed class FormalSlotClaimService
                 return Blocked(SlotClaimBlockReason.ConfigurationDisabled);
             }
 
-            if (config.IsPaused)
+            if (config.IsPaused || IsPauseProtectionActive)
             {
                 return Blocked(SlotClaimBlockReason.AutomationPaused);
             }

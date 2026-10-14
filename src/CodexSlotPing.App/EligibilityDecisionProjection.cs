@@ -9,7 +9,8 @@ public static class EligibilityDecisionProjection
     public static EligibilityView Create(
         EligibilityDecision decision,
         CultureInfo? culture = null,
-        DateTimeOffset? nextPlannedAttemptAtUtc = null)
+        DateTimeOffset? nextPlannedAttemptAtUtc = null,
+        bool scheduleDeferredUntilResume = false)
     {
         ArgumentNullException.ThrowIfNull(decision);
         var selectedCulture = UiText.ResolveCulture(culture ?? CultureInfo.CurrentUICulture);
@@ -32,7 +33,9 @@ public static class EligibilityDecisionProjection
             DetailsText = FormatDetails(view, selectedCulture),
             TestNowConfirmationText = FormatTestNowConfirmation(view, selectedCulture),
             UserFacingStatus = FormatUserFacingStatus(view, selectedCulture),
-            NextPlannedAttemptText = FormatPlannedAttempt(nextPlannedAttemptAtUtc, selectedCulture)
+            NextPlannedAttemptText = scheduleDeferredUntilResume
+                ? UiText.Get("Main.ScheduleRecalculateAfterResume", selectedCulture)
+                : FormatPlannedAttempt(nextPlannedAttemptAtUtc, selectedCulture)
         };
         return projected with { Details = FormatExplainabilityDetails(projected, selectedCulture) };
     }
