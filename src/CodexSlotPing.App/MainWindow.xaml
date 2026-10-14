@@ -94,6 +94,10 @@
             </ItemsControl>
 
             <Border Height="1" Background="#D8DAD4" Margin="0,14,0,12" />
+            <TextBlock Text="{loc:Loc Main.EligibilityTitle}" Style="{StaticResource SectionLabel}" />
+            <TextBlock x:Name="EligibilityDetailsText" Text="—" TextWrapping="Wrap" Foreground="#424A44" Margin="0,6,0,0" />
+
+            <Border Height="1" Background="#D8DAD4" Margin="0,14,0,12" />
 
             <Button Style="{StaticResource ShortcutRow}" Click="OpenSettingsShortcut_Click" ToolTip="{loc:Loc Main.OpenSettingHint}">
                 <Grid>
@@ -119,6 +123,11 @@
                     <TextBlock Grid.Column="2" Text="›" Foreground="#7D837D" HorizontalAlignment="Right" />
                 </Grid>
             </Button>
+            <Grid Margin="0,0,0,2">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="112" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                <TextBlock Text="{loc:Loc Main.AutomationControl}" Foreground="#68706A" />
+                <TextBlock x:Name="AutomationStatusText" Grid.Column="1" Text="—" FontWeight="Medium" />
+            </Grid>
             <Button Style="{StaticResource ShortcutRow}" Click="OpenSettingsShortcut_Click" ToolTip="{loc:Loc Main.OpenSettingHint}">
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="112" /><ColumnDefinition Width="*" /><ColumnDefinition Width="18" /></Grid.ColumnDefinitions>
@@ -144,11 +153,12 @@
                     Style="{StaticResource QuietButton}" Visibility="Collapsed" HorizontalAlignment="Left"
                     Margin="0,8,0,0" Click="TimezoneAction_Click" />
 
-            <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
+            <WrapPanel Margin="0,18,0,0">
                 <Button x:Name="TestNowButton" Content="{loc:Loc Main.TestNow}" Style="{StaticResource QuietButton}" Click="TestNow_Click" />
+                <Button x:Name="AutomationPauseButton" Content="{loc:Loc Automation.Pause}" Style="{StaticResource QuietButton}" Click="ToggleAutomation_Click" />
                 <Button x:Name="SettingsButton" Content="{loc:Loc Main.Settings}" Style="{StaticResource QuietButton}" Click="Settings_Click" />
                 <Button x:Name="OpenLogsButton" Content="{loc:Loc Main.OpenLogs}" Style="{StaticResource QuietButton}" Click="OpenLogs_Click" />
-            </StackPanel>
+            </WrapPanel>
             <TextBlock Text="{loc:Loc Main.StrictSlot}" FontSize="11" Foreground="#7D837D" Margin="0,16,0,0" />
         </StackPanel>
     </ScrollViewer>

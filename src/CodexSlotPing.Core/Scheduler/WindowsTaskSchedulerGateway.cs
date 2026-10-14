@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.Principal;
-using System.Text.RegularExpressions;
 
 namespace CodexSlotPing.Core.Scheduler;
 
@@ -12,6 +11,7 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
     public const string ProductionTaskPath = SchedulerTaskContract.ProductionTaskPath;
     public const string OwnerMarker = SchedulerTaskContract.OwnerMarker;
 
+    private const int TaskTriggerTime = 1;
     private const int TaskTriggerDaily = 2;
     private const int TaskActionExec = 0;
     private const int TaskCreateOrUpdate = 6;
@@ -387,7 +387,7 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
             settings = definitionObject.Settings;
             dynamic settingsObject = settings;
             settingsObject.Enabled = source.Enabled;
-            settingsObject.StartWhenAvailable = false;
+            settingsObject.StartWhenAvailable = true;
             settingsObject.MultipleInstances = TaskMultipleInstancesIgnoreNew;
             settingsObject.ExecutionTimeLimit = "PT2M";
             settingsObject.RestartCount = 0;
@@ -401,15 +401,15 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
 
             triggers = definitionObject.Triggers;
             dynamic triggersObject = triggers;
-            var boundaryDate = source.StartBoundaryDate ?? DateOnly.FromDateTime(DateTime.Today);
-            foreach (var time in source.SlotTimes.Order())
+            if (source.SchedulePlan.OneShotTriggerAtUtc is { } triggerAtUtc)
             {
-                object trigger = triggersObject.Create(TaskTriggerDaily);
+                object trigger = triggersObject.Create(TaskTriggerTime);
                 dynamic triggerObject = trigger;
                 triggerObject.Enabled = true;
-                triggerObject.DaysInterval = 1;
-                triggerObject.StartBoundary = string.Create(CultureInfo.InvariantCulture,
-                    $"{boundaryDate:yyyy-MM-dd}T{time:HH:mm:ss}");
+                var localStart = triggerAtUtc.ToLocalTime();
+                var localEnd = triggerAtUtc.AddDays(3650).ToLocalTime();
+                triggerObject.StartBoundary = localStart.ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture);
+                triggerObject.EndBoundary = localEnd.ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture);
                 ReleaseComObject(trigger);
             }
 
@@ -476,7 +476,8 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
                         triggerType == TaskTriggerDaily,
                         (bool)triggerObject.Enabled,
                         triggerType == TaskTriggerDaily ? (int)triggerObject.DaysInterval : 0,
-                        (string)triggerObject.StartBoundary));
+                        (string)triggerObject.StartBoundary,
+                        triggerType == TaskTriggerTime ? (string?)triggerObject.EndBoundary : null));
                 }
                 finally
                 {
@@ -544,10 +545,12 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
         if (!PathsEqual(readback.WorkingDirectory, Path.GetDirectoryName(currentRunnerPath)))
             mismatches.Add("working-directory-mismatch");
         if (readback.ActionCount != 1) mismatches.Add("action-count-mismatch");
-        if (readback.Triggers.Count != 4 || readback.Triggers.Any(trigger =>
-            !trigger.IsDaily || !trigger.Enabled || trigger.DaysInterval != 1 || !IsLocalBoundary(trigger.StartBoundary)))
+        if (readback.Triggers.Count > 1 || readback.Triggers.Any(trigger =>
+            !trigger.IsOneShot || !trigger.Enabled ||
+            !TryParseBoundary(trigger.StartBoundary, out var start) ||
+            !TryParseBoundary(trigger.EndBoundary, out var end) || end <= start))
             mismatches.Add("trigger-contract-mismatch");
-        if (readback.StartWhenAvailable) mismatches.Add("start-when-available-enabled");
+        if (!readback.StartWhenAvailable) mismatches.Add("start-when-available-disabled");
         if (readback.MultipleInstancesPolicy != "IgnoreNew") mismatches.Add("multiple-instance-policy-mismatch");
         if (!string.Equals(readback.ExecutionTimeLimit, "PT2M", StringComparison.OrdinalIgnoreCase)) mismatches.Add("execution-limit-mismatch");
         if (readback.RestartCount != 0 || !string.IsNullOrEmpty(readback.RestartInterval)) mismatches.Add("restart-on-failure-enabled");
@@ -568,9 +571,20 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
             return false;
         }
 
-        var expectedTimes = definition.SlotTimes.Order().Select(time => time.ToString("HH:mm", CultureInfo.InvariantCulture));
-        var actualTimes = status.Readback.Triggers.Select(trigger => trigger.StartBoundary.Substring(11, 5));
-        return status.Readback.WakeToRun == definition.WakeToRun && expectedTimes.SequenceEqual(actualTimes, StringComparer.Ordinal);
+        if (status.Readback.WakeToRun != definition.WakeToRun)
+        {
+            return false;
+        }
+
+        var expectedAt = definition.SchedulePlan.OneShotTriggerAtUtc;
+        if (expectedAt is null)
+        {
+            return status.Readback.Triggers.Count == 0;
+        }
+
+        return status.Readback.Triggers.Count == 1 &&
+               TryParseBoundary(status.Readback.Triggers[0].StartBoundary, out var actualAt) &&
+               actualAt.ToUniversalTime() == expectedAt.Value.ToUniversalTime();
     }
 
     private static SchedulerTaskReadback ReadTaskDefinitionForTask(dynamic task)
@@ -701,8 +715,8 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
             !definition.RunnerPath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || !File.Exists(definition.RunnerPath))
             return "invalid-runner-path";
         if (!IsTimeZoneCompatible(definition.ConfiguredTimeZoneId)) return "timezone-mismatch";
-        if (definition.SlotTimes is null || definition.SlotTimes.Count != 4 || definition.SlotTimes.Distinct().Count() != 4)
-            return "invalid-slot-definition";
+        if (definition.SchedulePlan is null)
+            return "invalid-schedule-plan";
         return null;
     }
 
@@ -756,8 +770,13 @@ public sealed class WindowsTaskSchedulerGateway : ITaskSchedulerGateway
         }
     }
 
-    private static bool IsLocalBoundary(string boundary) =>
-        Regex.IsMatch(boundary, @"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", RegexOptions.CultureInvariant);
+    private static bool TryParseBoundary(string? boundary, out DateTimeOffset value) =>
+        DateTimeOffset.TryParseExact(
+            boundary,
+            "yyyy-MM-dd'T'HH:mm:sszzz",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out value);
 
     private static string MultipleInstancesName(int value) => value switch
     {

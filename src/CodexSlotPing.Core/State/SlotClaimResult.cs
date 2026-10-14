@@ -1,5 +1,6 @@
 using CodexSlotPing.Core.Slots;
 using CodexSlotPing.Core.Configuration;
+using CodexSlotPing.Core.Eligibility;
 
 namespace CodexSlotPing.Core.State;
 
@@ -15,11 +16,13 @@ public enum SlotClaimBlockReason
 {
     MutexUnavailable,
     ConfigurationDisabled,
+    AutomationPaused,
     InvalidConfigOrState,
     ClockRollback,
     TimeZoneMismatch,
     TimeZoneUnavailable,
     InvalidConfiguration,
+    EligibilityNotSatisfied,
     StatePersistenceFailed
 }
 
@@ -32,4 +35,6 @@ public sealed record SlotClaimResult(
     public bool IsClaimed => Kind == SlotClaimKind.Claimed;
 
     public AppConfig? ConfigSnapshot { get; init; }
+
+    public EligibilityDecision? EligibilityDecision { get; init; }
 }

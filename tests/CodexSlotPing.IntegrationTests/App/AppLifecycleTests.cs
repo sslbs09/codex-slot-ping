@@ -1,7 +1,10 @@
 using CodexSlotPing.App;
 using CodexSlotPing.Core.Codex;
+using CodexSlotPing.Core.Concurrency;
 using CodexSlotPing.Core.Configuration;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Scheduler;
+using CodexSlotPing.Core.Slots;
 using CodexSlotPing.Core.State;
 using CodexSlotPing.Core.Testing;
 using CodexSlotPing.Core.Time;
@@ -22,7 +25,7 @@ public sealed class AppLifecycleTests
     [Fact]
     public void ActiveSchedulerExitWarning_IsClearAndOnlyShownWhenNotSuppressed()
     {
-        Assert.Equal("Closing Codex Slot Ping does not disable scheduled slots.", AppExitPolicy.ExitWarning);
+        Assert.Equal("Closing Codex Slot Ping does not disable planned attempts.", AppExitPolicy.ExitWarning);
         Assert.True(AppExitPolicy.ShouldShowWarning(schedulerOn: true, suppressed: false));
         Assert.False(AppExitPolicy.ShouldShowWarning(schedulerOn: false, suppressed: false));
         Assert.False(AppExitPolicy.ShouldShowWarning(schedulerOn: true, suppressed: true));
@@ -69,7 +72,7 @@ public sealed class AppLifecycleTests
     public async Task RepeatedTestNowRequests_OnlyStartOneRequestWhileActive()
     {
         var calls = 0;
-        var completion = new TaskCompletionSource<TestRunResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completion = new TaskCompletionSource<TestNowRunResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
         var fixture = new ControllerFixture((_, _) =>
         {
             Interlocked.Increment(ref calls);
@@ -82,7 +85,11 @@ public sealed class AppLifecycleTests
 
         Assert.Null(second);
         Assert.Equal(1, calls);
-        completion.SetResult(new TestRunResult("test-id", ConfirmedResult(), Now));
+        completion.SetResult(new TestNowRunResponse(
+            new EligibilityDecision(EligibilityDecision.CurrentSchemaVersion, EligibilityIntent.TestNow,
+                EligibilityStatus.Eligible, EligibilityReason.Ready, null, Confidence.Unknown,
+                ObservationSource.Unknown, false),
+            new TestRunResult("test-id", ConfirmedResult(), Now)));
         Assert.NotNull(await first);
     }
 
@@ -90,7 +97,11 @@ public sealed class AppLifecycleTests
     public async Task TrayWakeToggle_UpdatesSavedSettingsAndPreservesEnabledState()
     {
         var scheduler = new FakeScheduler(OwnedStatus(enabled: true));
-        var fixture = new ControllerFixture((_, _) => Task.FromResult(new TestRunResult("unused", ConfirmedResult(), Now)),
+        var fixture = new ControllerFixture((_, _) => Task.FromResult(new TestNowRunResponse(
+            new EligibilityDecision(EligibilityDecision.CurrentSchemaVersion, EligibilityIntent.TestNow,
+                EligibilityStatus.Eligible, EligibilityReason.Ready, null, Confidence.Unknown,
+                ObservationSource.Unknown, false),
+            new TestRunResult("unused", ConfirmedResult(), Now))),
             scheduler);
 
         var result = await fixture.Controller.SetWakeToRunAsync(true, CancellationToken.None);
@@ -162,12 +173,16 @@ public sealed class AppLifecycleTests
     {
         public const string RunnerPath = @"C:\portable\CodexSlotPing.Runner.exe";
 
-        public ControllerFixture(Func<AppConfig, CancellationToken, Task<TestRunResult>> runTestNow,
+        public ControllerFixture(Func<string, CancellationToken, Task<TestNowRunResponse>> runTestNow,
             FakeScheduler? scheduler = null)
         {
             ConfigStore = new MemoryConfigStore(AppConfigDefaults.Create());
             var zone = new FixedTimeZoneProvider();
-            Controller = new AppController(new FixedClock(Now), zone, ConfigStore, new MemoryStateStore(),
+            var stateStore = new MemoryStateStore();
+            var mutex = new RecordingStateMutex();
+            var claimService = new FormalSlotClaimService(new FixedClock(Now), zone, ConfigStore, stateStore, mutex,
+                new SlotAdmissionEvaluator(zone), new EligibilityEvaluator());
+            Controller = new AppController(new FixedClock(Now), zone, ConfigStore, stateStore, claimService,
                 scheduler ?? new FakeScheduler(new SchedulerStatus(SchedulerTaskContract.ProductionTaskPath,
                     SchedulerState.OFF, false, false, false, null, null, Array.Empty<string>(), null)),
                 new ReadyEnvironmentDetector(), RunnerPath, runTestNow,
@@ -214,8 +229,27 @@ public sealed class AppLifecycleTests
 
     private sealed class MemoryStateStore : IStateStore
     {
-        public Task<StateDocument> LoadAsync(CancellationToken cancellationToken) => Task.FromResult(StateDocument.Empty());
-        public Task SaveAsync(StateDocument state, CancellationToken cancellationToken) => Task.CompletedTask;
+        public StateDocument State { get; private set; } = StateDocument.Empty();
+        public Task<StateDocument> LoadAsync(CancellationToken cancellationToken) => Task.FromResult(State);
+        public Task SaveAsync(StateDocument state, CancellationToken cancellationToken)
+        {
+            State = state;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingStateMutex : IStateMutex
+    {
+        private bool _held;
+        public StateMutexLease? TryAcquire(TimeSpan timeout)
+        {
+            if (_held)
+            {
+                return null;
+            }
+            _held = true;
+            return new StateMutexLease(() => _held = false);
+        }
     }
 
     private sealed class FakeScheduler(SchedulerStatus status) : ITaskSchedulerGateway
@@ -234,7 +268,15 @@ public sealed class AppLifecycleTests
             Definitions.Add(definition);
             Status = OwnedStatus(definition.Enabled) with
             {
-                Readback = Status.Readback! with { WakeToRun = definition.WakeToRun }
+                Readback = Status.Readback! with
+                {
+                    WakeToRun = definition.WakeToRun,
+                    Triggers = definition.SchedulePlan.OneShotTriggerAtUtc is { } at
+                        ? [new SchedulerTriggerReadback(1, false, true, 0,
+                            at.ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz"),
+                            at.AddDays(3650).ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz"))]
+                        : Array.Empty<SchedulerTriggerReadback>()
+                }
             };
             return Task.FromResult(new SchedulerOperationResult(true, null, Status));
         }

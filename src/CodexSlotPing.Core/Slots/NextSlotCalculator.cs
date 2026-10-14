@@ -57,7 +57,7 @@ public sealed class NextSlotCalculator
             return null;
         }
 
-        if (!TryGetDefinitions(config.Slots, out var definitions))
+        if (!TryGetDefinitions(config.LegacyFixedSlots, out var definitions))
         {
             return null;
         }

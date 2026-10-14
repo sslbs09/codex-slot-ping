@@ -1,4 +1,5 @@
 using CodexSlotPing.Core.Persistence;
+using CodexSlotPing.Core.Eligibility;
 using CodexSlotPing.Core.Slots;
 
 namespace CodexSlotPing.Core.State;
@@ -26,15 +27,23 @@ public sealed class JsonStateStore : IStateStore
     public Task SaveAsync(StateDocument state, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(state);
-        EnsureSupportedAndValid(state);
-        return _jsonFile.WriteAsync(_path, state, cancellationToken);
+        var stateToSave = state.SchemaVersion == 1
+            ? StateDocumentMigrator.MigrateV1ToV2(state)
+            : state;
+        EnsureSupportedAndValid(stateToSave);
+        return _jsonFile.WriteAsync(_path, stateToSave, cancellationToken);
     }
 
     private static void EnsureSupportedAndValid(StateDocument state)
     {
-        if (state.SchemaVersion != 1)
+        if (state.SchemaVersion is not 1 and not StateDocument.CurrentSchemaVersion)
         {
             throw new InvalidDataException($"Unsupported state schema version: {state.SchemaVersion}.");
+        }
+
+        if (state.SchemaVersion == 1 && state.Eligibility is not null)
+        {
+            throw new InvalidDataException("The v1 state document must not contain eligibility state.");
         }
 
         if (state.FormalSlots is null)
@@ -48,13 +57,21 @@ public sealed class JsonStateStore : IStateStore
             if (record is null ||
                 record.SlotId is null ||
                 string.IsNullOrWhiteSpace(record.SlotId.WindowsTimeZoneId) ||
-                record.Position is < 1 or > 4 ||
+                record.Position is < 0 or > 4 ||
                 !Enum.IsDefined(record.Status) ||
                 record.Status == FormalSlotStatus.PENDING ||
                 !seenSlotIds.Add(record.SlotId))
             {
                 throw new InvalidDataException("The state document contains an invalid formal slot record.");
             }
+        }
+
+        var fixedPositionRecords = state.FormalSlots.Where(record => record.Position > 0).ToArray();
+        if (fixedPositionRecords
+            .GroupBy(record => (record.SlotId.WindowsTimeZoneId, record.SlotId.LocalDate, record.Position))
+            .Any(group => group.Count() > 1))
+        {
+            throw new InvalidDataException("The state document contains duplicate legacy slot positions.");
         }
 
         if (state.LastTest is { } lastTest &&
@@ -65,6 +82,55 @@ public sealed class JsonStateStore : IStateStore
              lastTest.ElapsedMilliseconds < 0))
         {
             throw new InvalidDataException("The state document contains an invalid Test Now record.");
+        }
+
+        if (state.ActiveTestNowClaim is { } activeTestNowClaim &&
+            (string.IsNullOrWhiteSpace(activeTestNowClaim.TestId) ||
+             activeTestNowClaim.ClaimedAtUtc.Offset != TimeSpan.Zero ||
+             string.Equals(activeTestNowClaim.TestId, state.LastTest?.TestId, StringComparison.Ordinal)))
+        {
+            throw new InvalidDataException("The state document contains an invalid active Test Now claim.");
+        }
+
+        if (state.SchemaVersion == StateDocument.CurrentSchemaVersion)
+        {
+            EnsureEligibilityIsValid(state);
+        }
+    }
+
+    private static void EnsureEligibilityIsValid(StateDocument state)
+    {
+        var eligibility = state.Eligibility;
+        if (eligibility is null)
+        {
+            throw new InvalidDataException("The state document is missing eligibility state.");
+        }
+
+        if (eligibility.SchemaVersion != EligibilityState.CurrentSchemaVersion)
+        {
+            throw new InvalidDataException($"Unsupported eligibility schema version: {eligibility.SchemaVersion}.");
+        }
+
+        if (eligibility.Observations is null ||
+            eligibility.Observations.Any(observation =>
+                observation is null ||
+                !Enum.IsDefined(observation.Kind) ||
+                !Enum.IsDefined(observation.Source) ||
+                !Enum.IsDefined(observation.Confidence)))
+        {
+            throw new InvalidDataException("The state document contains an invalid eligibility observation.");
+        }
+
+        if (state.HighestObservedUtc != eligibility.HighestObservedUtc)
+        {
+            throw new InvalidDataException("The state document contains inconsistent highestObservedUtc values.");
+        }
+
+        var hasUnresolvedClaim = state.FormalSlots.Any(record => record.Status == FormalSlotStatus.CLAIMED) ||
+                                 state.ActiveTestNowClaim is not null;
+        if (eligibility.HasUnresolvedClaim != hasUnresolvedClaim)
+        {
+            throw new InvalidDataException("The state document contains an inconsistent unresolved claim marker.");
         }
     }
 }

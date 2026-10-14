@@ -12,23 +12,25 @@
   <data name="Main.LoginNotConfirmed" xml:space="preserve"><value>ChatGPT login not confirmed</value></data>
   <data name="Main.LoginUnknown" xml:space="preserve"><value>Login status could not be confirmed</value></data>
   <data name="Main.CliVersionUnavailable" xml:space="preserve"><value>Codex CLI version unavailable</value></data>
-  <data name="Main.NextSlot" xml:space="preserve"><value>NEXT SLOT</value></data>
+  <data name="Main.NextSlot" xml:space="preserve"><value>NEXT PLANNED ATTEMPT</value></data>
   <data name="Main.WaitingForSchedule" xml:space="preserve"><value>Waiting for schedule</value></data>
-  <data name="Main.UpdateTimezoneForNext" xml:space="preserve"><value>Update the timezone lock to calculate the next slot.</value></data>
-  <data name="Main.NoEligibleFutureSlot" xml:space="preserve"><value>No eligible future slot is available.</value></data>
-  <data name="Main.AdmissionWindowClosesIn" xml:space="preserve"><value>Admission window closes in {0}</value></data>
+  <data name="Main.UpdateTimezoneForNext" xml:space="preserve"><value>Update the timezone lock before calculating the next planned attempt.</value></data>
+  <data name="Main.NoPlannedAttempt" xml:space="preserve"><value>No attempt is currently planned.</value></data>
+  <data name="Main.ScheduleRecalculateAfterResume" xml:space="preserve"><value>The plan will be recalculated after resuming.</value></data>
+  <data name="Main.AttemptPlannedNow" xml:space="preserve"><value>Based on the local scheduling policy.</value></data>
   <data name="Main.StartsIn" xml:space="preserve"><value>Starts in {0}</value></data>
-  <data name="Main.Today" xml:space="preserve"><value>TODAY</value></data>
+  <data name="Main.Today" xml:space="preserve"><value>LEGACY FIXED SLOTS</value></data>
   <data name="Main.Model" xml:space="preserve"><value>Model</value></data>
   <data name="Main.Reasoning" xml:space="preserve"><value>Reasoning</value></data>
   <data name="Main.Scheduler" xml:space="preserve"><value>Scheduler</value></data>
+  <data name="Main.AutomationControl" xml:space="preserve"><value>Automation control</value></data>
   <data name="Main.WakeComputer" xml:space="preserve"><value>Wake computer</value></data>
   <data name="Main.CopyInstructions" xml:space="preserve"><value>Copy instructions</value></data>
   <data name="Main.TimezoneAction" xml:space="preserve"><value>Use current timezone and update scheduler</value></data>
   <data name="Main.TestNow" xml:space="preserve"><value>Test now</value></data>
   <data name="Main.Settings" xml:space="preserve"><value>Settings</value></data>
   <data name="Main.OpenLogs" xml:space="preserve"><value>Open logs</value></data>
-  <data name="Main.StrictSlot" xml:space="preserve"><value>Strict slot · missed slots are not replayed.</value></data>
+  <data name="Main.StrictSlot" xml:space="preserve"><value>The scheduler only wakes Runner; Core checks eligibility again.</value></data>
   <data name="Main.OpenSettingHint" xml:space="preserve"><value>Open the related setting</value></data>
   <data name="Main.OfficialCliInstructions" xml:space="preserve"><value>Install the official Codex CLI: npm install -g @openai/codex&#xD;&#xA;Then sign in with your ChatGPT account: codex login</value></data>
   <data name="Main.StatusRefreshFailed" xml:space="preserve"><value>Status could not be refreshed: {0}</value></data>
@@ -36,6 +38,10 @@
   <data name="Main.TestNowAlreadyRunning" xml:space="preserve"><value>A Test Now request is already running.</value></data>
   <data name="Main.TestNowConfirmTitle" xml:space="preserve"><value>Confirm Test Now</value></data>
   <data name="Main.TestNowConfirmBody" xml:space="preserve"><value>This sends your configured prompt to Codex as a real request and may count toward usage limits. Continue?</value></data>
+  <data name="Main.TestNowConfirmWithDecision" xml:space="preserve"><value>{0}{1}Local attempt status: {2}{1}Reason: {3}{1}Confidence: {4}{1}Next planned attempt: {5}{6}{1}{1}Confirm one Test Now attempt?</value></data>
+  <data name="Main.EligibilityTitle" xml:space="preserve"><value>Local attempt plan</value></data>
+  <data name="Main.EligibilityDetails" xml:space="preserve"><value>Status: {0}{1}Reason: {2}{1}Confidence: {3}{1}Next planned attempt: {4}{5}</value></data>
+  <data name="Main.EligibilityExplanation" xml:space="preserve"><value>Note: {0}</value></data>
   <data name="Main.TestNowResultTitle" xml:space="preserve"><value>Test Now result</value></data>
   <data name="Main.TestNowFailedTitle" xml:space="preserve"><value>Test Now failed</value></data>
   <data name="Main.LogsOpenFailed" xml:space="preserve"><value>Logs could not be opened: {0}</value></data>
@@ -48,6 +54,7 @@
   <data name="Scheduler.TimezoneChanged" xml:space="preserve"><value>Timezone changed / scheduler needs update. Configured: {0}; current: {1}.</value></data>
   <data name="Scheduler.Conflict" xml:space="preserve"><value>A same-name task is not owned by this app; it was left untouched.</value></data>
   <data name="Scheduler.ReadFailed" xml:space="preserve"><value>Task Scheduler state could not be verified.</value></data>
+  <data name="Scheduler.PauseDisableFailed" xml:space="preserve"><value>Scheduler is still enabled while automation is paused.</value></data>
   <data name="Diagnostic.CodexNotFound" xml:space="preserve"><value>Codex CLI was not found or its native executable is missing.</value></data>
   <data name="Diagnostic.CliVersionUnknown" xml:space="preserve"><value>Codex CLI version could not be confirmed.</value></data>
   <data name="Diagnostic.LoginUnknown" xml:space="preserve"><value>ChatGPT login status could not be confirmed.</value></data>
@@ -103,6 +110,7 @@
   <data name="State.NeedsRepair" xml:space="preserve"><value>Needs repair</value></data>
   <data name="State.TimezoneChanged" xml:space="preserve"><value>Timezone changed</value></data>
   <data name="State.Conflict" xml:space="preserve"><value>Conflict</value></data>
+  <data name="State.Error" xml:space="preserve"><value>Error</value></data>
   <data name="State.Unknown" xml:space="preserve"><value>Unknown</value></data>
   <data name="Slot.Confirmed" xml:space="preserve"><value>✓ Confirmed</value></data>
   <data name="Slot.AttemptedUnconfirmed" xml:space="preserve"><value>△ Attempted · unconfirmed</value></data>
@@ -114,23 +122,48 @@
   <data name="TestResult.Reason" xml:space="preserve"><value>Reason: {0}</value></data>
   <data name="Tray.Open" xml:space="preserve"><value>Open</value></data>
   <data name="Tray.TestNow" xml:space="preserve"><value>Test now</value></data>
+  <data name="Tray.StatusLabel" xml:space="preserve"><value>Automation status</value></data>
+  <data name="Tray.Settings" xml:space="preserve"><value>Settings</value></data>
+  <data name="Tray.Tooltip" xml:space="preserve"><value>Codex Slot Ping · {0}</value></data>
+  <data name="Tray.Status.SchedulerError" xml:space="preserve"><value>Scheduler error</value></data>
+  <data name="Tray.Status.Paused" xml:space="preserve"><value>Automation is paused · plan recalculated after resume</value></data>
+  <data name="Tray.Status.PauseNotPersisted" xml:space="preserve"><value>Pause not saved · claims blocked here · replan on resume</value></data>
+  <data name="Tray.Status.Disabled" xml:space="preserve"><value>Automation is disabled</value></data>
+  <data name="Tray.Status.Blocked" xml:space="preserve"><value>Automatic scheduling is blocked · {0}</value></data>
+  <data name="Tray.Status.Unknown" xml:space="preserve"><value>Current conditions cannot be confirmed</value></data>
+  <data name="Tray.Status.Waiting" xml:space="preserve"><value>Waiting for the next planned check · {0}</value></data>
+  <data name="Tray.Status.Ready" xml:space="preserve"><value>Conditions met · waiting for planned wake-up</value></data>
   <data name="Tray.SchedulerLabel" xml:space="preserve"><value>Scheduler state</value></data>
+  <data name="Tray.AutomationControl" xml:space="preserve"><value>Automation: {0}</value></data>
+  <data name="Tray.AutomationControlLabel" xml:space="preserve"><value>Automation control</value></data>
   <data name="Tray.SchedulerState" xml:space="preserve"><value>Scheduler state: {0}</value></data>
   <data name="Tray.WakeComputer" xml:space="preserve"><value>Wake computer</value></data>
   <data name="Tray.OpenLogs" xml:space="preserve"><value>Open logs</value></data>
   <data name="Tray.Exit" xml:space="preserve"><value>Exit</value></data>
+  <data name="Automation.State.Enabled" xml:space="preserve"><value>Enabled</value></data>
+  <data name="Automation.State.Paused" xml:space="preserve"><value>Paused</value></data>
+  <data name="Automation.State.Disabled" xml:space="preserve"><value>Disabled</value></data>
+  <data name="Automation.State.DisabledAndPaused" xml:space="preserve"><value>Disabled · pause retained</value></data>
+  <data name="Automation.State.PauseNotPersisted" xml:space="preserve"><value>Pause not saved · temporary protection</value></data>
+  <data name="Automation.Pause" xml:space="preserve"><value>Pause automation</value></data>
+  <data name="Automation.Resume" xml:space="preserve"><value>Resume automation</value></data>
+  <data name="Automation.PausedMessage" xml:space="preserve"><value>Automatic scheduling is paused. Test Now remains available after confirmation.</value></data>
+  <data name="Automation.ResumedMessage" xml:space="preserve"><value>Automatic scheduling resumed with a fresh plan.</value></data>
+  <data name="Automation.ControlSaveFailed" xml:space="preserve"><value>Automation control could not be saved.</value></data>
+  <data name="Automation.PauseNotPersistedProtected" xml:space="preserve"><value>Pause was not saved; this process will temporarily block scheduled claims until it closes.</value></data>
+  <data name="Automation.SchedulerSyncFailed" xml:space="preserve"><value>Automation control was saved, but the scheduler could not be synchronized.</value></data>
   <data name="Settings.WindowTitle" xml:space="preserve"><value>Codex Slot Ping settings</value></data>
   <data name="Settings.Header" xml:space="preserve"><value>SETTINGS</value></data>
   <data name="Settings.SectionTitle" xml:space="preserve"><value>Schedule and request</value></data>
-  <data name="Settings.FourLocalTimes" xml:space="preserve"><value>Four local times (24-hour HH:mm)</value></data>
+  <data name="Settings.FourLocalTimes" xml:space="preserve"><value>Legacy fixed slots for diagnostics (24-hour HH:mm; not used for scheduling)</value></data>
   <data name="Settings.ModelRequest" xml:space="preserve"><value>Model selection request</value></data>
   <data name="Settings.ReasoningSupport" xml:space="preserve"><value>Reasoning effort supported by the detected CLI</value></data>
-  <data name="Settings.PromptLabel" xml:space="preserve"><value>Prompt sent at each formal slot and by Test Now</value></data>
+  <data name="Settings.PromptLabel" xml:space="preserve"><value>Prompt sent by scheduled attempts and Test Now</value></data>
   <data name="Settings.TimezoneBehavior" xml:space="preserve"><value>Timezone behavior</value></data>
   <data name="Settings.SystemTimezoneDescription" xml:space="preserve"><value>SYSTEM follows Windows. A timezone lock must match the current Windows timezone.</value></data>
   <data name="Settings.TimezoneSystem" xml:space="preserve"><value>SYSTEM</value></data>
   <data name="Settings.ConfirmTimezone" xml:space="preserve"><value>Confirm current timezone and update scheduler</value></data>
-  <data name="Settings.WakeComputer" xml:space="preserve"><value>Wake the computer for scheduled slots</value></data>
+  <data name="Settings.WakeComputer" xml:space="preserve"><value>Wake the computer for a planned attempt</value></data>
   <data name="Settings.RawLogs" xml:space="preserve"><value>Capture raw Codex output locally (14-day retention)</value></data>
   <data name="Settings.RawLogsExplanation" xml:space="preserve"><value>Raw output can contain Codex responses. It stays in your local logs folder and is removed after 14 days.</value></data>
   <data name="Settings.Save" xml:space="preserve"><value>Save settings</value></data>
@@ -138,11 +171,12 @@
   <data name="Settings.DisableScheduler" xml:space="preserve"><value>Disable scheduler</value></data>
   <data name="Settings.RemoveScheduler" xml:space="preserve"><value>Remove scheduler</value></data>
   <data name="Settings.Close" xml:space="preserve"><value>Close</value></data>
-  <data name="Settings.SchedulerWarning" xml:space="preserve"><value>Installing enables four local-time triggers. Each eligible trigger can send the configured prompt to Codex and may count toward usage.</value></data>
+  <data name="Settings.SchedulerWarning" xml:space="preserve"><value>Windows Scheduler only wakes Runner at one planned time. Runner rechecks Core eligibility before any Codex request.</value></data>
   <data name="Settings.Saved" xml:space="preserve"><value>Settings saved.</value></data>
   <data name="Settings.InstallConfirmTitle" xml:space="preserve"><value>Confirm scheduler installation</value></data>
-  <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>This creates or updates the owned Windows scheduled task. At each eligible slot it sends your configured prompt to Codex and may count toward usage limits. Continue?</value></data>
+  <data name="Settings.InstallConfirmBody" xml:space="preserve"><value>This creates or updates the owned Windows task. When local policy allows an attempt, it wakes Runner, which rechecks eligibility before sending your configured prompt to Codex. Continue?</value></data>
   <data name="Settings.InstallSuccess" xml:space="preserve"><value>Scheduler installed and read back as ON.</value></data>
+  <data name="Settings.InstallPausedSuccess" xml:space="preserve"><value>Scheduler plan updated and left OFF while automation is paused.</value></data>
   <data name="Settings.DisableConfirmTitle" xml:space="preserve"><value>Disable scheduler</value></data>
   <data name="Settings.DisableConfirmBody" xml:space="preserve"><value>Disable the owned Codex Slot Ping scheduled task?</value></data>
   <data name="Settings.DisableSuccess" xml:space="preserve"><value>Scheduler is OFF.</value></data>
@@ -161,8 +195,36 @@
   <data name="Exit.PreferenceSaveFailed" xml:space="preserve"><value>Exit will continue, but the preference could not be saved: {0}</value></data>
   <data name="Exit.WarningTitle" xml:space="preserve"><value>Codex Slot Ping is scheduled</value></data>
   <data name="Exit.SuppressWarning" xml:space="preserve"><value>Don't show this warning again</value></data>
-  <data name="Exit.Warning" xml:space="preserve"><value>Closing Codex Slot Ping does not disable scheduled slots.</value></data>
+  <data name="Exit.Warning" xml:space="preserve"><value>Closing Codex Slot Ping does not disable planned attempts.</value></data>
   <data name="Exit.Explanation" xml:space="preserve"><value>The scheduled task runs independently of this window. Exit only closes the app.</value></data>
   <data name="Exit.ExitApp" xml:space="preserve"><value>Exit app</value></data>
   <data name="Exit.Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Eligibility.None" xml:space="preserve"><value>—</value></data>
+  <data name="Eligibility.UserFacingStatus.Eligible" xml:space="preserve"><value>Current conditions are met; waiting for the planned wake-up</value></data>
+  <data name="Eligibility.UserFacingStatus.NotYetEligible" xml:space="preserve"><value>Waiting for the next planned check</value></data>
+  <data name="Eligibility.UserFacingStatus.Blocked" xml:space="preserve"><value>Automatic scheduling is blocked: {0}</value></data>
+  <data name="Eligibility.UserFacingStatus.Unknown" xml:space="preserve"><value>Current conditions cannot be confirmed</value></data>
+  <data name="Eligibility.UserFacingStatus.ConfirmationRequired" xml:space="preserve"><value>Confirm before starting a Test Now attempt</value></data>
+  <data name="Main.EligibilityExplainabilityDetails" xml:space="preserve"><value>{0}{1}Reason: {2}{1}Confidence: {3}{1}Next planned attempt: {4}{5}</value></data>
+  <data name="Eligibility.Status.Eligible" xml:space="preserve"><value>Local policy allows an attempt</value></data>
+  <data name="Eligibility.Status.NotYetEligible" xml:space="preserve"><value>Waiting for planned attempt time</value></data>
+  <data name="Eligibility.Status.Blocked" xml:space="preserve"><value>Blocked</value></data>
+  <data name="Eligibility.Status.Unknown" xml:space="preserve"><value>Unknown</value></data>
+  <data name="Eligibility.Status.ConfirmationRequired" xml:space="preserve"><value>Confirmation required</value></data>
+  <data name="Eligibility.Confidence.Unknown" xml:space="preserve"><value>Unknown</value></data>
+  <data name="Eligibility.Confidence.Low" xml:space="preserve"><value>Low</value></data>
+  <data name="Eligibility.Confidence.Medium" xml:space="preserve"><value>Medium</value></data>
+  <data name="Eligibility.Confidence.High" xml:space="preserve"><value>High</value></data>
+  <data name="Eligibility.Reason.Ready" xml:space="preserve"><value>Ready for a local attempt</value></data>
+  <data name="Eligibility.Reason.ExternalManualUsageUnknown" xml:space="preserve"><value>Based on local scheduling policy. Codex usage outside this app cannot currently be observed.</value></data>
+  <data name="Eligibility.Reason.UsageLimitWithoutTrustedReset" xml:space="preserve"><value>Usage limit observed without a trusted reset time</value></data>
+  <data name="Eligibility.Reason.WaitingForTrustedReset" xml:space="preserve"><value>Waiting for the trusted reset time</value></data>
+  <data name="Eligibility.Reason.TestNowConfirmationRequired" xml:space="preserve"><value>Confirm one real Test Now attempt</value></data>
+  <data name="Eligibility.Reason.TestNowExplicitlyConfirmed" xml:space="preserve"><value>Manual Test Now attempt explicitly confirmed</value></data>
+  <data name="Eligibility.Reason.ClockRollback" xml:space="preserve"><value>System time is earlier than the persisted UTC high-water mark</value></data>
+  <data name="Eligibility.Reason.UnresolvedClaim" xml:space="preserve"><value>Another request claim is unresolved</value></data>
+  <data name="Eligibility.Reason.UnsupportedStateSchema" xml:space="preserve"><value>State schema is not supported</value></data>
+  <data name="Eligibility.Reason.InvalidRequest" xml:space="preserve"><value>Eligibility request is invalid</value></data>
+  <data name="Eligibility.Reason.InvalidState" xml:space="preserve"><value>Eligibility state is invalid</value></data>
+  <data name="Eligibility.Reason.LocalAttemptSpacing" xml:space="preserve"><value>Waiting for the local spacing policy before the next planned attempt</value></data>
 </root>

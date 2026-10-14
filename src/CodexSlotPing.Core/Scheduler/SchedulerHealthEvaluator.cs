@@ -9,7 +9,7 @@ public sealed class SchedulerHealthEvaluator
         string currentRunnerPath,
         string configuredTimeZoneId,
         string currentWindowsTimeZoneId,
-        IReadOnlyList<string>? expectedSlotTimes = null)
+        SchedulePlan? expectedSchedulePlan = null)
     {
         ArgumentNullException.ThrowIfNull(status);
         ArgumentException.ThrowIfNullOrWhiteSpace(currentRunnerPath);
@@ -42,11 +42,11 @@ public sealed class SchedulerHealthEvaluator
         {
             mismatches.Add("action-count-mismatch");
         }
-        if (expectedSlotTimes is not null && status.Readback is { } readback &&
-            readback.Triggers.Count == 4 && !TriggerTimesMatch(readback.Triggers, expectedSlotTimes) &&
-            !mismatches.Contains("trigger-times-mismatch", StringComparer.Ordinal))
+        if (expectedSchedulePlan is not null && status.Readback is { } readback &&
+            !TriggerPlanMatches(readback.Triggers, expectedSchedulePlan) &&
+            !mismatches.Contains("trigger-plan-mismatch", StringComparer.Ordinal))
         {
-            mismatches.Add("trigger-times-mismatch");
+            mismatches.Add("trigger-plan-mismatch");
         }
         var timezoneChanged = !string.Equals(configuredTimeZoneId, "SYSTEM", StringComparison.OrdinalIgnoreCase) &&
                               !string.Equals(configuredTimeZoneId, currentWindowsTimeZoneId, StringComparison.OrdinalIgnoreCase);
@@ -84,34 +84,32 @@ public sealed class SchedulerHealthEvaluator
         };
     }
 
-    private static bool TriggerTimesMatch(
+    private static bool TriggerPlanMatches(
         IReadOnlyList<SchedulerTriggerReadback> triggers,
-        IReadOnlyList<string> expectedSlotTimes)
+        SchedulePlan expectedPlan)
     {
-        if (expectedSlotTimes.Count != 4 || triggers.Count != 4)
+        if (expectedPlan.OneShotTriggerAtUtc is null)
         {
-            return false;
+            return triggers.Count == 0;
         }
 
-        var expected = expectedSlotTimes.OrderBy(time => time, StringComparer.Ordinal).ToArray();
-        var actual = new string[4];
-        for (var index = 0; index < triggers.Count; index++)
-        {
-            if (!DateTime.TryParseExact(
-                    triggers[index].StartBoundary,
-                    "yyyy-MM-dd'T'HH:mm:ss",
-                    CultureInfo.InvariantCulture,
-                    DateTimeStyles.None,
-                    out var startBoundary))
-            {
-                return false;
-            }
-
-            actual[index] = startBoundary.ToString("HH:mm", CultureInfo.InvariantCulture);
-        }
-
-        Array.Sort(actual, StringComparer.Ordinal);
-        return expected.SequenceEqual(actual, StringComparer.Ordinal);
+        return triggers.Count == 1 &&
+               triggers[0].IsOneShot &&
+               triggers[0].Enabled &&
+               DateTimeOffset.TryParseExact(
+                   triggers[0].StartBoundary,
+                   "yyyy-MM-dd'T'HH:mm:sszzz",
+                   CultureInfo.InvariantCulture,
+                   DateTimeStyles.None,
+                   out var actualAtUtc) &&
+               DateTimeOffset.TryParseExact(
+                   triggers[0].EndBoundary,
+                   "yyyy-MM-dd'T'HH:mm:sszzz",
+                   CultureInfo.InvariantCulture,
+                   DateTimeStyles.None,
+                   out var actualEndUtc) &&
+               actualEndUtc > actualAtUtc &&
+               actualAtUtc.ToUniversalTime() == expectedPlan.OneShotTriggerAtUtc.Value.ToUniversalTime();
     }
 
     private static SchedulerState ResolveState(

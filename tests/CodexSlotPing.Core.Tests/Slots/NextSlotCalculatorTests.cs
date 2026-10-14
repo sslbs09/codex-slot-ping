@@ -52,7 +52,7 @@ public sealed class NextSlotCalculatorTests
     public void ClaimedPosition_IsSkippedAfterItsConfiguredTimeChanges()
     {
         var date = new DateOnly(2026, 1, 15);
-        var config = AppConfigDefaults.Create() with { TimeZone = EasternTimeZoneId, Slots = ["08:00", "12:01", "17:01", "22:01"] };
+        var config = AppConfigDefaults.Create() with { TimeZone = EasternTimeZoneId, LegacyFixedSlots = ["08:00", "12:01", "17:01", "22:01"] };
         var state = WithRecords(Record(date, "07:00", 1, FormalSlotStatus.CLAIMED));
         var nowUtc = AtLocal(date, new TimeOnly(6, 0));
 
@@ -66,7 +66,7 @@ public sealed class NextSlotCalculatorTests
     public void EditedUnclaimedFutureTime_CreatesNewIdentity()
     {
         var date = new DateOnly(2026, 1, 15);
-        var config = AppConfigDefaults.Create() with { TimeZone = EasternTimeZoneId, Slots = ["07:00", "12:10", "17:01", "22:01"] };
+        var config = AppConfigDefaults.Create() with { TimeZone = EasternTimeZoneId, LegacyFixedSlots = ["07:00", "12:10", "17:01", "22:01"] };
         var state = WithRecords(
             Record(date, "07:00", 1, FormalSlotStatus.CONFIRMED_SUCCESS),
             Record(date, "12:01", 2, FormalSlotStatus.MISSED));

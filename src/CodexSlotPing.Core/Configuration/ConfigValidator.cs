@@ -23,12 +23,12 @@ public static class ConfigValidator
 
         var errors = new List<string>();
 
-        if (candidate.SchemaVersion != 1)
+        if (candidate.SchemaVersion != 2)
         {
-            errors.Add("schemaVersion must be 1.");
+            errors.Add("schemaVersion must be 2.");
         }
 
-        ValidateSlots(candidate.Slots, errors);
+        ValidateSlots(candidate.LegacyFixedSlots, errors);
         ValidateTimeZone(candidate.TimeZone, currentWindowsTimeZoneId, errors);
 
         if (string.IsNullOrWhiteSpace(candidate.Model))
