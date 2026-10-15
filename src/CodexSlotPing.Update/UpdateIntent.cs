@@ -42,5 +42,8 @@ public interface IUpdateIntentReader
 
 public interface IUpdateIntentLifecycle : IUpdateIntentReader
 {
+    UpdateIntentCreateStatus Create(UpdateIntent intent);
     bool TryDelete(Guid operationId);
+    bool TryDelete(Guid operationId, ProcessIdentity expectedUpdater);
+    bool TryUpdateOwner(Guid operationId, ProcessIdentity updater);
 }

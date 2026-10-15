@@ -28,7 +28,8 @@ internal static class Program
                 journals,
                 runtime,
                 fileSystem,
-                new FileStartupAcknowledgementWaiter(acknowledgements));
+                new FileStartupAcknowledgementWaiter(acknowledgements),
+                new UpdateHandoffReadyStore(paths));
             var recovery = new UpdateTransactionRecoveryService(
                 paths,
                 intents,

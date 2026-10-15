@@ -27,7 +27,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task UpdaterCommandRunner_StartsNewTransactionWhenJournalIsMissing()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.Acknowledgement = StartupAcknowledgementWaitResult.Received(
             fixture.CreateAcknowledgement(fixture.Runtime.NewAppIdentity));
 

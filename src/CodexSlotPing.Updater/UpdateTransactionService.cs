@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CodexSlotPing.Update;
 
 namespace CodexSlotPing.Updater;
@@ -9,7 +10,9 @@ internal sealed class UpdateTransactionService(
     IUpdateTransactionJournalStore journalStore,
     IUpdateTransactionRuntime runtime,
     IUpdateTransactionFileSystem fileSystem,
-    IStartupAcknowledgementWaiter acknowledgementWaiter)
+    IStartupAcknowledgementWaiter acknowledgementWaiter,
+    IUpdateHandoffReadyStore handoffReadyStore,
+    Func<ProcessIdentity>? processIdentityProvider = null)
 {
     private static readonly SemVersion MinimumAutomaticVersion = SemVersion.Parse("0.3.0");
     private static readonly TimeSpan AppExitTimeout = TimeSpan.FromSeconds(30);
@@ -62,11 +65,9 @@ internal sealed class UpdateTransactionService(
         {
             return Result(UpdaterResultCode.IntentMismatch, "intent-read-failed");
         }
-        if (intentRead.Status != UpdateIntentReadStatus.Active || intentRead.Intent is null ||
-            intentRead.Intent.OperationId != invocation.OperationId ||
-            !string.Equals(intentRead.Intent.InstallIdentity, identity.Key, StringComparison.Ordinal))
+        if (intentRead.Status != UpdateIntentReadStatus.Missing)
         {
-            return Result(UpdaterResultCode.IntentMismatch, "intent-operation-mismatch");
+            return Result(UpdaterResultCode.IntentMismatch, "conflicting-update-intent");
         }
 
         var existingJournal = journalStore.Read(invocation.OperationId);
@@ -82,14 +83,42 @@ internal sealed class UpdateTransactionService(
         var preflight = ValidateBeforeWaiting(invocation, identity, siblings);
         if (!preflight.IsValid)
         {
-            ClearOwnedIntent(invocation.OperationId);
             return Result(UpdaterResultCode.PreflightFailed, preflight.Error ?? "preflight-failed");
+        }
+
+        ProcessIdentity updaterIdentity;
+        try
+        {
+            updaterIdentity = processIdentityProvider?.Invoke() ?? ReadCurrentProcessIdentity();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+        {
+            return Result(UpdaterResultCode.PreflightFailed, "updater-identity-unavailable");
+        }
+
+        var createdUtc = DateTimeOffset.UtcNow;
+        var intent = new UpdateIntent(
+            1, InstallIdentity.ProductIdValue, identity.Key, invocation.OperationId,
+            updaterIdentity.ProcessId, updaterIdentity.StartedUtc, createdUtc);
+        if (intentStore.Create(intent) != UpdateIntentCreateStatus.Created)
+        {
+            return Result(UpdaterResultCode.IntentMismatch, "update-intent-create-failed");
+        }
+
+        var handoffReady = new UpdateHandoffReady(
+            1, InstallIdentity.ProductIdValue, identity.Key, invocation.OperationId,
+            updaterIdentity.ProcessId, updaterIdentity.StartedUtc, DateTimeOffset.UtcNow);
+        if (handoffReadyStore.TryPublish(handoffReady) != UpdateHandoffReadyWriteStatus.Created)
+        {
+            ClearOwnedIntent(invocation.OperationId);
+            return Result(UpdaterResultCode.PreflightFailed, "handoff-ready-publish-failed");
         }
 
         var appWait = await runtime.WaitForAppExitAsync(invocation.AppIdentity, AppExitTimeout, cancellationToken).ConfigureAwait(false);
         if (appWait != AppProcessWaitStatus.Exited)
         {
             ClearOwnedIntent(invocation.OperationId);
+            handoffReadyStore.TryDelete(invocation.OperationId);
             return Result(UpdaterResultCode.AppExitTimeout, appWait == AppProcessWaitStatus.Unknown ? "app-identity-unavailable" : "app-exit-timeout");
         }
 
@@ -97,6 +126,7 @@ internal sealed class UpdateTransactionService(
         if (drain.Status != RunnerDrainWaitStatus.Acquired || drain.Lease is null)
         {
             ClearOwnedIntent(invocation.OperationId);
+            handoffReadyStore.TryDelete(invocation.OperationId);
             return Result(
                 drain.Status == RunnerDrainWaitStatus.TimedOut ? UpdaterResultCode.RunnerDrainTimeout : UpdaterResultCode.PreflightFailed,
                 drain.Status == RunnerDrainWaitStatus.TimedOut ? "runner-drain-timeout" : "runner-lease-failed");
@@ -104,7 +134,12 @@ internal sealed class UpdateTransactionService(
 
         using (drain.Lease)
         {
-            return await ExecuteWithLeaseAsync(invocation, identity, siblings, preflight, cancellationToken).ConfigureAwait(false);
+            var result = await ExecuteWithLeaseAsync(invocation, identity, siblings, preflight, cancellationToken).ConfigureAwait(false);
+            if (result.Code != UpdaterResultCode.RecoveryRequired)
+            {
+                handoffReadyStore.TryDelete(invocation.OperationId);
+            }
+            return result;
         }
     }
 
@@ -209,7 +244,7 @@ internal sealed class UpdateTransactionService(
         }
 
         var appPath = Path.Combine(identity.InstallRoot, "CodexSlotPing.App.exe");
-        var launched = await runtime.LaunchAppAsync(appPath, identity.InstallRoot, invocation.OperationId, cancellationToken).ConfigureAwait(false);
+        var launched = await runtime.LaunchAppAsync(appPath, identity.InstallRoot, invocation.OperationId, rollback: false, cancellationToken).ConfigureAwait(false);
         if (!launched.Succeeded || launched.Identity is null)
         {
             return await RollbackAsync(replacementInstalled, preflight.CurrentVersion!, invocation.TargetVersion, null,
@@ -363,7 +398,7 @@ internal sealed class UpdateTransactionService(
         if (launchOldApp)
         {
             var oldAppPath = Path.Combine(identity.InstallRoot, "CodexSlotPing.App.exe");
-            await runtime.LaunchAppAsync(oldAppPath, identity.InstallRoot, null, cancellationToken).ConfigureAwait(false);
+            await runtime.LaunchAppAsync(oldAppPath, identity.InstallRoot, journal.OperationId, rollback: true, cancellationToken).ConfigureAwait(false);
         }
 
         TryDeleteValidatedPackage(siblings.FailedSiblingPath, targetVersion);
@@ -509,6 +544,12 @@ internal sealed class UpdateTransactionService(
 
     private static bool PathsEqual(string left, string right) =>
         string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)), StringComparison.OrdinalIgnoreCase);
+
+    private static ProcessIdentity ReadCurrentProcessIdentity()
+    {
+        using var process = Process.GetCurrentProcess();
+        return new ProcessIdentity(process.Id, new DateTimeOffset(process.StartTime.ToUniversalTime()));
+    }
 
     private static DateTimeOffset UtcAfter(DateTimeOffset value)
     {

@@ -1,4 +1,5 @@
 using CodexSlotPing.Update;
+using System.Diagnostics;
 
 namespace CodexSlotPing.Updater;
 
@@ -55,6 +56,13 @@ internal sealed class UpdateTransactionRecoveryService(
 
         var snapshotFailure = ReadRecoverySnapshot(invocation, identity, out _);
         if (snapshotFailure is not null) return snapshotFailure;
+
+        var activeIntent = intentStore.Read();
+        if (activeIntent.Status == UpdateIntentReadStatus.Active && activeIntent.Intent?.OperationId == invocation.OperationId &&
+            !intentStore.TryUpdateOwner(invocation.OperationId, ReadCurrentProcessIdentity()))
+        {
+            return Result(UpdaterResultCode.RecoveryRequired, "recovery-intent-owner-adoption-failed");
+        }
 
         if (InstallRootProtection.IsProtected(identity.InstallRoot) || !NoReparsePointsInDirectoryChain(siblings.ParentDirectory) ||
             !fileSystem.ProbeParentRename(siblings.ParentDirectory))
@@ -331,7 +339,8 @@ internal sealed class UpdateTransactionRecoveryService(
         var rolledBack = journal with { Phase = UpdateTransactionPhase.RolledBack, UpdatedUtc = UtcAfter(journal.UpdatedUtc) };
         if (!TryUpdate(rolledBack)) return Result(UpdaterResultCode.RecoveryRequired, "recovery-rolled-back-journal-failed");
 
-        await runtime.LaunchAppAsync(Path.Combine(identity.InstallRoot, "CodexSlotPing.App.exe"), identity.InstallRoot, null, cancellationToken).ConfigureAwait(false);
+        await runtime.LaunchAppAsync(Path.Combine(identity.InstallRoot, "CodexSlotPing.App.exe"), identity.InstallRoot,
+            journal.OperationId, rollback: true, cancellationToken).ConfigureAwait(false);
         var (newSibling, failedSibling) = (Inspect(siblings.NewSiblingPath, target), Inspect(siblings.FailedSiblingPath, target));
         CleanupTargetArtifacts(siblings, newSibling, failedSibling, target);
         return ClearIntentOrRecovery(journal.OperationId, UpdaterResultCode.StartupFailedRolledBack, "recovery-restored-old-install");
@@ -474,6 +483,12 @@ internal sealed class UpdateTransactionRecoveryService(
     }
 
     private static UpdateTransactionResult Result(UpdaterResultCode code, string detail) => new(code, detail);
+
+    private static ProcessIdentity ReadCurrentProcessIdentity()
+    {
+        using var process = Process.GetCurrentProcess();
+        return new ProcessIdentity(process.Id, new DateTimeOffset(process.StartTime.ToUniversalTime()));
+    }
 
     private enum PackageState { Missing, Old, Target, Invalid }
 }

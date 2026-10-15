@@ -7,10 +7,36 @@ namespace CodexSlotPing.Updater.Tests;
 public sealed partial class UpdateTransactionServiceTests
 {
     [Fact]
+    public async Task ExecuteAsync_UpdaterCreatesIntentAndPublishesReadyBeforeWaitingOrInstallMutation()
+    {
+        using var fixture = new TransactionFixture();
+        var intentAtWait = UpdateIntentReadStatus.Missing;
+        UpdateIntent? ownedIntentAtWait = null;
+        var readyAtWait = UpdateHandoffReadyReadStatus.Missing;
+        var movesAtWait = -1;
+        fixture.Runtime.OnAppWait = () =>
+        {
+            intentAtWait = fixture.IntentStore.Read().Status;
+            ownedIntentAtWait = fixture.IntentStore.Read().Intent;
+            readyAtWait = fixture.HandoffStore.Read(fixture.OperationId).Status;
+            movesAtWait = fixture.FileSystem.Moves.Count;
+        };
+        fixture.Acknowledgement = StartupAcknowledgementWaitResult.Received(fixture.CreateAcknowledgement(fixture.Runtime.NewAppIdentity));
+
+        var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
+
+        Assert.Equal(UpdaterResultCode.Success, result.Code);
+        Assert.Equal(UpdateIntentReadStatus.Active, intentAtWait);
+        Assert.Equal(UpdateHandoffReadyReadStatus.Active, readyAtWait);
+        Assert.Equal(0, movesAtWait);
+        Assert.Equal(fixture.Runtime.UpdaterIdentity.ProcessId, ownedIntentAtWait?.UpdaterPid);
+        Assert.Equal(fixture.Runtime.UpdaterIdentity.StartedUtc, ownedIntentAtWait?.UpdaterStartedUtc);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_HappyPathReplacesPackageAndCompletesOnlyAfterMatchingAck()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.Acknowledgement = StartupAcknowledgementWaitResult.Received(fixture.CreateAcknowledgement(fixture.Runtime.NewAppIdentity));
 
         var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
@@ -30,7 +56,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_PreparedJournalFailureLeavesCurrentInstallUntouched()
     {
         using var fixture = new TransactionFixture { FailPreparedJournal = true };
-        fixture.PublishIntent();
 
         var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
 
@@ -46,7 +71,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_ReplacementRenameFailureRestoresOldInstall()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.FileSystem.FailMove = (source, destination) =>
             PathsEqual(source, fixture.Siblings.NewSiblingPath) && PathsEqual(destination, fixture.InstallRoot);
 
@@ -63,7 +87,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_RollbackFailurePreservesBackupJournalAndIntent()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.FileSystem.FailMove = (source, destination) =>
             (PathsEqual(source, fixture.Siblings.NewSiblingPath) && PathsEqual(destination, fixture.InstallRoot)) ||
             (PathsEqual(source, fixture.Siblings.BackupSiblingPath) && PathsEqual(destination, fixture.InstallRoot));
@@ -80,7 +103,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_AppExitTimeoutDoesNotMutateInstallAndClearsIntent()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.Runtime.AppWait = AppProcessWaitStatus.TimedOut;
 
         var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
@@ -95,7 +117,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_RunnerDrainTimeoutDoesNotMutateInstallAndClearsIntent()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.Runtime.RunnerDrain = RunnerDrainWaitResult.TimedOut();
 
         var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
@@ -111,7 +132,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_InvalidCurrentManifestRefusesBeforeWaitingOrMutating()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         File.WriteAllText(Path.Combine(fixture.InstallRoot, "unowned.txt"), "user-owned");
 
         var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
@@ -127,7 +147,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_UnwritableParentRefusesBeforeWaitingOrMutating()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.FileSystem.ParentProbeSucceeds = false;
 
         var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
@@ -142,7 +161,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_PreexistingSiblingCollisionIsPreservedAndRefused()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         Directory.CreateDirectory(fixture.Siblings.NewSiblingPath);
         var marker = Path.Combine(fixture.Siblings.NewSiblingPath, "collision.txt");
         File.WriteAllText(marker, "must survive");
@@ -159,7 +177,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_PreexistingBackupCollisionIsPreservedAndRefused()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         Directory.CreateDirectory(fixture.Siblings.BackupSiblingPath);
         var marker = Path.Combine(fixture.Siblings.BackupSiblingPath, "collision.txt");
         File.WriteAllText(marker, "must survive");
@@ -176,7 +193,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_DuplicateInvocationCannotClearIntentOwnedByRunningTransaction()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         using var copyStarted = new ManualResetEventSlim(false);
         using var allowCopy = new ManualResetEventSlim(false);
         fixture.FileSystem.CopyStarted = copyStarted;
@@ -209,7 +225,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_RejectsLegacyInstallWithoutManifestVersion030OrLater()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.SetCurrentVersion("0.2.0");
 
         var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
@@ -223,7 +238,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_RejectsPrereleaseCurrentInstallThatRecoveryCannotClassify()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.SetCurrentVersion("0.3.1-preview.1");
 
         var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
@@ -238,7 +252,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_FirstRenameFailureLeavesCurrentInstallUntouched()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.FileSystem.FailMove = (source, destination) =>
             PathsEqual(source, fixture.InstallRoot) && PathsEqual(destination, fixture.Siblings.BackupSiblingPath);
 
@@ -254,7 +267,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_FirstRenameAndTerminalJournalWriteFailuresPreserveRecoveryState()
     {
         using var fixture = new TransactionFixture { FailJournalUpdate = true };
-        fixture.PublishIntent();
         fixture.FileSystem.FailMove = (source, destination) =>
             PathsEqual(source, fixture.InstallRoot) && PathsEqual(destination, fixture.Siblings.BackupSiblingPath);
 
@@ -275,7 +287,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_NewSiblingManifestMismatchRefusesBeforeCurrentInstallRename()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.FileSystem.CorruptCopiedManifest = true;
 
         var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
@@ -291,7 +302,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_NewAppLaunchFailureRollsBackAndRelaunchesOldApp()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.Runtime.FailNextAppLaunch = true;
 
         var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
@@ -300,7 +310,9 @@ public sealed partial class UpdateTransactionServiceTests
         Assert.Equal("0.3.0", PackageDirectoryValidator.ValidateDirectory(fixture.InstallRoot).Version!.ToString());
         Assert.Equal(2, fixture.Runtime.Launches.Count);
         Assert.NotNull(fixture.Runtime.Launches[0].OperationId);
-        Assert.Null(fixture.Runtime.Launches[1].OperationId);
+        Assert.False(fixture.Runtime.Launches[0].Rollback);
+        Assert.Equal(fixture.OperationId, fixture.Runtime.Launches[1].OperationId);
+        Assert.True(fixture.Runtime.Launches[1].Rollback);
         Assert.Equal(UpdateIntentReadStatus.Missing, fixture.IntentStore.Read().Status);
     }
 
@@ -308,7 +320,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_MismatchedStartupAcknowledgementRollsBack()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.Acknowledgement = StartupAcknowledgementWaitResult.Received(
             fixture.CreateAcknowledgement(fixture.Runtime.NewAppIdentity) with { RunningVersion = "0.3.2" });
 
@@ -327,7 +338,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_RejectsStaleOrWrongProcessAcknowledgements(string mismatch)
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         var acknowledgement = fixture.CreateAcknowledgement(fixture.Runtime.NewAppIdentity);
         fixture.Acknowledgement = StartupAcknowledgementWaitResult.Received(mismatch switch
         {
@@ -348,7 +358,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_MissingStartupAcknowledgementTimesOutAndRollsBack()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.Acknowledgement = StartupAcknowledgementWaitResult.TimedOut();
 
         var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
@@ -362,7 +371,6 @@ public sealed partial class UpdateTransactionServiceTests
     public async Task ExecuteAsync_CopiesStageToInstallParentSiblingAndRenamesOnlyInstallSiblings()
     {
         using var fixture = new TransactionFixture();
-        fixture.PublishIntent();
         fixture.Acknowledgement = StartupAcknowledgementWaitResult.Received(fixture.CreateAcknowledgement(fixture.Runtime.NewAppIdentity));
 
         var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
@@ -401,6 +409,7 @@ public sealed partial class UpdateTransactionServiceTests
             Identity = InstallIdentity.Create(InstallIdentity.ProductIdValue, InstallRoot);
             ControlPaths = UpdateControlPaths.ForInstall(Path.Combine(_root, "local-app-data"), Identity);
             IntentStore = new UpdateIntentStore(ControlPaths);
+            HandoffStore = new UpdateHandoffReadyStore(ControlPaths);
             JournalStore = new UpdateTransactionJournalStore(ControlPaths);
             Siblings = UpdateTransactionPaths.ForInstall(InstallRoot, OperationId);
             Invocation = new UpdaterInvocation(OperationId, SemVersion.Parse("0.3.1"), InstallRoot, StageRoot, AppIdentity);
@@ -416,6 +425,7 @@ public sealed partial class UpdateTransactionServiceTests
         public InstallIdentity Identity { get; }
         public UpdateControlPaths ControlPaths { get; }
         public UpdateIntentStore IntentStore { get; }
+        public UpdateHandoffReadyStore HandoffStore { get; }
         public UpdateTransactionJournalStore JournalStore { get; }
         public UpdateTransactionPathSet Siblings { get; }
         public UpdaterInvocation Invocation { get; }
@@ -447,7 +457,7 @@ public sealed partial class UpdateTransactionServiceTests
         public UpdateTransactionService CreateService(string? updaterBaseDirectory = null) => new(
             Path.GetFullPath(updaterBaseDirectory ?? StageRoot), ControlPaths, IntentStore,
             FailPreparedJournal || FailJournalUpdate ? new FailingJournalStore(JournalStore, FailPreparedJournal, FailJournalUpdate) : JournalStore,
-            Runtime, FileSystem, new FakeAcknowledgementWaiter(this));
+            Runtime, FileSystem, new FakeAcknowledgementWaiter(this), HandoffStore, () => Runtime.UpdaterIdentity);
 
         public static void WriteExternalPackage(string root, string version, string marker) => WritePackage(root, version, marker);
 
@@ -479,8 +489,9 @@ public sealed partial class UpdateTransactionServiceTests
 
     private sealed class FakeRuntime : IUpdateTransactionRuntime
     {
+        public ProcessIdentity UpdaterIdentity { get; } = new(6002, new DateTimeOffset(2026, 10, 15, 4, 5, 7, TimeSpan.Zero));
         public ProcessIdentity NewAppIdentity { get; } = new(7001, new DateTimeOffset(2026, 10, 15, 4, 7, 8, TimeSpan.Zero));
-        public List<(string Path, Guid? OperationId)> Launches { get; } = [];
+        public List<(string Path, Guid? OperationId, bool Rollback)> Launches { get; } = [];
         public AppProcessWaitStatus AppWait { get; set; } = AppProcessWaitStatus.Exited;
         public RunnerDrainWaitResult RunnerDrain { get; set; } = RunnerDrainWaitResult.Acquired(new DummyLease());
         public bool FailNextAppLaunch { get; set; }
@@ -489,11 +500,13 @@ public sealed partial class UpdateTransactionServiceTests
         public TimeSpan LastRunnerDrainTimeout { get; private set; }
         public ProcessIdentity? TerminatedProcess { get; private set; }
         public Action? OnRunnerDrain { get; set; }
+        public Action? OnAppWait { get; set; }
         public Task<AppProcessWaitStatus> WaitForAppExitAsync(ProcessIdentity app, TimeSpan timeout, CancellationToken cancellationToken) =>
             CountAppWait();
         private Task<AppProcessWaitStatus> CountAppWait()
         {
             AppWaitCalls++;
+            OnAppWait?.Invoke();
             return Task.FromResult(AppWait);
         }
         public Task<RunnerDrainWaitResult> WaitForRunnerDrainAsync(UpdateControlPaths paths, TimeSpan timeout, CancellationToken cancellationToken)
@@ -503,9 +516,9 @@ public sealed partial class UpdateTransactionServiceTests
             OnRunnerDrain?.Invoke();
             return Task.FromResult(RunnerDrain);
         }
-        public Task<UpdateAppLaunchResult> LaunchAppAsync(string executablePath, string workingDirectory, Guid? operationId, CancellationToken cancellationToken)
+        public Task<UpdateAppLaunchResult> LaunchAppAsync(string executablePath, string workingDirectory, Guid? operationId, bool rollback, CancellationToken cancellationToken)
         {
-            Launches.Add((executablePath, operationId));
+            Launches.Add((executablePath, operationId, rollback));
             if (FailNextAppLaunch)
             {
                 FailNextAppLaunch = false;

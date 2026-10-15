@@ -61,6 +61,7 @@ internal sealed class SystemUpdateTransactionRuntime(IProcessIdentityReader proc
         string executablePath,
         string workingDirectory,
         Guid? operationId,
+        bool rollback,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -73,7 +74,7 @@ internal sealed class SystemUpdateTransactionRuntime(IProcessIdentityReader proc
         };
         if (operationId.HasValue)
         {
-            startInfo.ArgumentList.Add("--update-operation");
+            startInfo.ArgumentList.Add(rollback ? "--update-rollback" : "--update-operation");
             startInfo.ArgumentList.Add(operationId.Value.ToString("D"));
         }
 

@@ -36,6 +36,27 @@ public sealed class UpdateIntentStoreTests
     }
 
     [Fact]
+    public void Create_WritesAndFlushesTemporaryFileBeforeAtomicPublish()
+    {
+        using var temp = new TemporaryDirectory();
+        var (identity, paths, _) = CreateStore(temp.Path);
+        string? createdPath = null;
+        var store = CreateStoreWithFailures(paths,
+            path => { createdPath = path; return OpenCreateNew(path); },
+            stream => stream.Flush(),
+            File.Delete);
+
+        var result = store.Create(CreateIntent(identity, Guid.NewGuid(), processId: 1234));
+
+        Assert.Equal(UpdateIntentCreateStatus.Created, result);
+        Assert.NotNull(createdPath);
+        Assert.NotEqual(paths.IntentFilePath, createdPath);
+        Assert.EndsWith(".tmp", createdPath, StringComparison.Ordinal);
+        Assert.True(File.Exists(paths.IntentFilePath));
+        Assert.False(Directory.EnumerateFiles(paths.DirectoryPath, "*.tmp").Any());
+    }
+
+    [Fact]
     public void Create_WriteIOException_ReturnsStorageFailureAndRemovesPartialMarker()
     {
         using var temp = new TemporaryDirectory();
@@ -72,7 +93,7 @@ public sealed class UpdateIntentStoreTests
     }
 
     [Fact]
-    public void Create_WriteFailureAndCleanupFailure_LeavesInvalidMarkerForRunnerFailClosed()
+    public void Create_WriteFailureAndCleanupFailure_DoesNotPublishPartialIntent()
     {
         using var temp = new TemporaryDirectory();
         var (identity, paths, _) = CreateStore(temp.Path);
@@ -86,8 +107,8 @@ public sealed class UpdateIntentStoreTests
 
         Assert.Equal("StorageFailure", result.ToString());
         Assert.NotEqual(UpdateIntentCreateStatus.AlreadyExists, result);
-        Assert.True(File.Exists(paths.IntentFilePath));
-        Assert.Equal(UpdateIntentReadStatus.Invalid, store.Read().Status);
+        Assert.False(File.Exists(paths.IntentFilePath));
+        Assert.Equal(UpdateIntentReadStatus.Missing, store.Read().Status);
     }
 
     [Fact]
@@ -168,6 +189,40 @@ public sealed class UpdateIntentStoreTests
         Assert.Equal(UpdateIntentCreateStatus.Created, store.Create(second));
         Assert.False(store.TryDelete(first.OperationId));
         Assert.Equal(second, store.Read().Intent);
+    }
+
+    [Fact]
+    public void TryDeleteWithOwner_RequiresMatchingUpdaterIdentity()
+    {
+        using var temp = new TemporaryDirectory();
+        var (identity, _, store) = CreateStore(temp.Path);
+        var intent = CreateIntent(identity, Guid.NewGuid(), processId: 1234);
+        Assert.Equal(UpdateIntentCreateStatus.Created, store.Create(intent));
+
+        Assert.False(store.TryDelete(intent.OperationId, new ProcessIdentity(1234, intent.UpdaterStartedUtc.AddSeconds(1))));
+        Assert.True(store.TryDelete(intent.OperationId, new ProcessIdentity(intent.UpdaterPid, intent.UpdaterStartedUtc)));
+    }
+
+    [Fact]
+    public void TryUpdateOwner_AtomicallyTransfersOnlyTheMatchingIntent()
+    {
+        using var temp = new TemporaryDirectory();
+        var (identity, paths, store) = CreateStore(temp.Path);
+        var intent = CreateIntent(identity, Guid.NewGuid(), processId: 1234);
+        var newOwner = new ProcessIdentity(5678, new DateTimeOffset(2026, 10, 15, 4, 7, 8, TimeSpan.Zero));
+        Assert.Equal(UpdateIntentCreateStatus.Created, store.Create(intent));
+
+        Assert.False(store.TryUpdateOwner(Guid.NewGuid(), newOwner));
+        Assert.True(store.TryUpdateOwner(intent.OperationId, newOwner));
+
+        var updated = store.Read().Intent;
+        Assert.NotNull(updated);
+        Assert.Equal(intent.OperationId, updated.OperationId);
+        Assert.Equal(intent.InstallIdentity, updated.InstallIdentity);
+        Assert.Equal(intent.CreatedUtc, updated.CreatedUtc);
+        Assert.Equal(newOwner.ProcessId, updated.UpdaterPid);
+        Assert.Equal(newOwner.StartedUtc, updated.UpdaterStartedUtc);
+        Assert.False(Directory.EnumerateFiles(paths.DirectoryPath, "*.tmp").Any());
     }
 
     private static (InstallIdentity Identity, UpdateControlPaths Paths, UpdateIntentStore Store) CreateStore(string root)

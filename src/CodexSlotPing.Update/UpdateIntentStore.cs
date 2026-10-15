@@ -43,14 +43,17 @@ public sealed class UpdateIntentStore(UpdateControlPaths paths) : IUpdateIntentL
                 return UpdateIntentCreateStatus.StorageFailure;
             }
 
+            var temporary = paths.IntentFilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             Stream stream;
             try
             {
-                stream = _createNew(paths.IntentFilePath);
+                stream = _createNew(temporary);
             }
             catch (IOException exception) when (IsAlreadyExists(exception))
             {
-                return UpdateIntentCreateStatus.AlreadyExists;
+                return File.Exists(paths.IntentFilePath)
+                    ? UpdateIntentCreateStatus.AlreadyExists
+                    : UpdateIntentCreateStatus.StorageFailure;
             }
             catch (Exception exception) when (IsStorageFailure(exception))
             {
@@ -64,11 +67,17 @@ public sealed class UpdateIntentStore(UpdateControlPaths paths) : IUpdateIntentL
                     JsonSerializer.Serialize(stream, intent, WriteOptions);
                     _flushToDisk(stream);
                 }
+                File.Move(temporary, paths.IntentFilePath);
                 return UpdateIntentCreateStatus.Created;
+            }
+            catch (IOException exception) when (IsAlreadyExists(exception) && File.Exists(paths.IntentFilePath))
+            {
+                TryDeletePartialMarker(temporary);
+                return UpdateIntentCreateStatus.AlreadyExists;
             }
             catch (Exception exception) when (IsStorageFailure(exception))
             {
-                TryDeletePartialMarker();
+                TryDeletePartialMarker(temporary);
                 return UpdateIntentCreateStatus.StorageFailure;
             }
         });
@@ -125,6 +134,68 @@ public sealed class UpdateIntentStore(UpdateControlPaths paths) : IUpdateIntentL
 
             File.Delete(paths.IntentFilePath);
             return true;
+        });
+    }
+
+    public bool TryDelete(Guid operationId, ProcessIdentity expectedUpdater)
+    {
+        ArgumentNullException.ThrowIfNull(expectedUpdater);
+        if (operationId == Guid.Empty || expectedUpdater.ProcessId <= 0 || expectedUpdater.StartedUtc.Offset != TimeSpan.Zero)
+        {
+            return false;
+        }
+
+        return WithMutationLock(() =>
+        {
+            var read = Read();
+            if (read.Status != UpdateIntentReadStatus.Active || read.Intent?.OperationId != operationId ||
+                !ProcessIdentityMatcher.Matches(read.Intent, expectedUpdater))
+            {
+                return false;
+            }
+
+            File.Delete(paths.IntentFilePath);
+            return true;
+        });
+    }
+
+    public bool TryUpdateOwner(Guid operationId, ProcessIdentity updater)
+    {
+        ArgumentNullException.ThrowIfNull(updater);
+        if (operationId == Guid.Empty || updater.ProcessId <= 0 || updater.StartedUtc.Offset != TimeSpan.Zero)
+        {
+            return false;
+        }
+
+        return WithMutationLock(() =>
+        {
+            var read = Read();
+            if (read.Status != UpdateIntentReadStatus.Active || read.Intent?.OperationId != operationId)
+            {
+                return false;
+            }
+
+            var replacement = read.Intent with
+            {
+                UpdaterPid = updater.ProcessId,
+                UpdaterStartedUtc = updater.StartedUtc
+            };
+            var temporary = paths.IntentFilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                using (var stream = _createNew(temporary))
+                {
+                    JsonSerializer.Serialize(stream, replacement, WriteOptions);
+                    _flushToDisk(stream);
+                }
+                File.Move(temporary, paths.IntentFilePath, overwrite: true);
+                return true;
+            }
+            catch (Exception exception) when (IsStorageFailure(exception))
+            {
+                TryDeletePartialMarker(temporary);
+                return false;
+            }
         });
     }
 
@@ -186,11 +257,11 @@ public sealed class UpdateIntentStore(UpdateControlPaths paths) : IUpdateIntentL
         }
     }
 
-    private void TryDeletePartialMarker()
+    private void TryDeletePartialMarker(string temporary)
     {
         try
         {
-            _deleteFile(paths.IntentFilePath);
+            _deleteFile(temporary);
         }
         catch (Exception exception) when (IsStorageFailure(exception))
         {

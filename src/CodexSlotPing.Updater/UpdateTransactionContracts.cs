@@ -50,7 +50,7 @@ internal interface IUpdateTransactionRuntime
 {
     Task<AppProcessWaitStatus> WaitForAppExitAsync(ProcessIdentity app, TimeSpan timeout, CancellationToken cancellationToken);
     Task<RunnerDrainWaitResult> WaitForRunnerDrainAsync(UpdateControlPaths paths, TimeSpan timeout, CancellationToken cancellationToken);
-    Task<UpdateAppLaunchResult> LaunchAppAsync(string executablePath, string workingDirectory, Guid? operationId, CancellationToken cancellationToken);
+    Task<UpdateAppLaunchResult> LaunchAppAsync(string executablePath, string workingDirectory, Guid? operationId, bool rollback, CancellationToken cancellationToken);
     Task TerminateIfSameProcessAsync(ProcessIdentity process, CancellationToken cancellationToken);
 }
 
