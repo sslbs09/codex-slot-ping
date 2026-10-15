@@ -88,6 +88,29 @@ public sealed class UpdateHandoffCoordinatorTests
     }
 
     [Fact]
+    public async Task PollReadThatExceedsTimeout_ReturnsTimedOutAndCleansOwnedMarkers()
+    {
+        using var fixture = new Fixture(timeout: TimeSpan.FromMilliseconds(25),
+            handoffReadDelay: TimeSpan.FromMilliseconds(35));
+        fixture.Launcher.OnStart = (_, process) =>
+        {
+            fixture.IntentStore.Create(new UpdateIntent(1, InstallIdentity.ProductIdValue, fixture.Identity.Key,
+                fixture.OperationId, process.Identity.ProcessId, process.Identity.StartedUtc, DateTimeOffset.UtcNow));
+            fixture.HandoffStore.TryPublish(new UpdateHandoffReady(1, InstallIdentity.ProductIdValue,
+                fixture.Identity.Key, fixture.OperationId, process.Identity.ProcessId + 1,
+                process.Identity.StartedUtc, DateTimeOffset.UtcNow));
+        };
+
+        var result = await fixture.Coordinator.BeginAsync(fixture.Descriptor, fixture.InstallRoot,
+            fixture.AppIdentity, () => false);
+
+        Assert.Equal(UpdateHandoffStatus.TimedOut, result.Status);
+        Assert.False(fixture.Launcher.LastProcess!.Alive);
+        Assert.Equal(UpdateIntentReadStatus.Missing, fixture.IntentStore.Read().Status);
+        Assert.Equal(UpdateHandoffReadyReadStatus.Missing, fixture.HandoffStore.Read(fixture.OperationId).Status);
+    }
+
+    [Fact]
     public async Task WrongUpdaterStartTimeMarker_IsIgnored()
     {
         using var fixture = new Fixture(timeout: TimeSpan.FromMilliseconds(20));
@@ -159,7 +182,7 @@ public sealed class UpdateHandoffCoordinatorTests
     private sealed class Fixture : IDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "CodexSlotPing.App.Tests", Guid.NewGuid().ToString("N"));
-        public Fixture(TimeSpan? timeout = null)
+        public Fixture(TimeSpan? timeout = null, TimeSpan? handoffReadDelay = null)
         {
             InstallRoot = Path.Combine(_root, "install");
             StageRoot = Path.Combine(_root, "updates", "0.3.1", OperationId.ToString("N"), "extract");
@@ -176,7 +199,10 @@ public sealed class UpdateHandoffCoordinatorTests
             IntentStore = new UpdateIntentStore(Paths);
             HandoffStore = new UpdateHandoffReadyStore(Paths);
             Launcher = new FakeLauncher();
-            Coordinator = new UpdateHandoffCoordinator(Paths, IntentStore, HandoffStore, Launcher,
+            IUpdateHandoffReadyStore coordinatorHandoffStore = handoffReadDelay is { } delay
+                ? new DelayedHandoffReadyStore(HandoffStore, delay)
+                : HandoffStore;
+            Coordinator = new UpdateHandoffCoordinator(Paths, IntentStore, coordinatorHandoffStore, Launcher,
                 timeout ?? TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(1));
         }
 
@@ -218,5 +244,18 @@ public sealed class UpdateHandoffCoordinatorTests
         public bool IsSameProcessAlive() => Alive;
         public Task TerminateIfSameProcessAsync(CancellationToken cancellationToken) { Alive = false; return Task.CompletedTask; }
         public void Dispose() { }
+    }
+
+    private sealed class DelayedHandoffReadyStore(IUpdateHandoffReadyStore inner, TimeSpan readDelay)
+        : IUpdateHandoffReadyStore
+    {
+        public UpdateHandoffReadyReadResult Read(Guid operationId)
+        {
+            Thread.Sleep(readDelay);
+            return inner.Read(operationId);
+        }
+
+        public UpdateHandoffReadyWriteStatus TryPublish(UpdateHandoffReady handoffReady) => inner.TryPublish(handoffReady);
+        public bool TryDelete(Guid operationId) => inner.TryDelete(operationId);
     }
 }

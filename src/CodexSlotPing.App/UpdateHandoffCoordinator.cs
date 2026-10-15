@@ -222,6 +222,7 @@ public sealed class UpdateHandoffCoordinator
                     }
 
                     var remaining = _timeout - stopwatch.Elapsed;
+                    if (remaining <= TimeSpan.Zero) break;
                     await Task.Delay(remaining < _pollInterval ? remaining : _pollInterval, cancellationToken).ConfigureAwait(false);
                 }
 
