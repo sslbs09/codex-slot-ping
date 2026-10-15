@@ -1,12 +1,13 @@
-name: Windows portable build
+name: Windows portable release validation
 
 on:
   pull_request:
   push:
     branches:
       - main
+      - 'feat/**'
     tags:
-      - 'v0.*'
+      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -15,6 +16,12 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.package_version.outputs.version }}
+      artifact_name: ${{ steps.package_version.outputs.artifact_name }}
+      release_eligible: ${{ steps.package_version.outputs.release_eligible }}
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -24,135 +31,146 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Test solution
-        run: dotnet test CodexSlotPing.sln -c Release
+      - name: Test package collision handling
+        shell: pwsh
+        run: ./scripts/test-release-package-collisions.ps1
 
-      - name: Publish self-contained App
-        run: >-
-          dotnet publish src/CodexSlotPing.App/CodexSlotPing.App.csproj
-          -c Release -r win-x64 --self-contained true
-          -p:PublishSingleFile=false
-          -p:DebugType=None -p:DebugSymbols=false
-          -o artifacts/stage
+      - name: Run full solution tests
+        run: dotnet test CodexSlotPing.sln -c Release --nologo --filter "Category!=ReleaseArtifactE2E"
 
-      - name: Publish self-contained Runner
-        run: >-
-          dotnet publish src/CodexSlotPing.Runner/CodexSlotPing.Runner.csproj
-          -c Release -r win-x64 --self-contained true
-          -p:PublishSingleFile=false
-          -p:DebugType=None -p:DebugSymbols=false
-          -o artifacts/stage/Runner
-
-      - name: Verify portable layout and create ZIP/checksum
-        id: package
+      - name: Resolve stable package version
+        id: package_version
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $propsPath = Join-Path $env:GITHUB_WORKSPACE 'Directory.Build.props'
-          [xml]$props = Get-Content -LiteralPath $propsPath -Raw
-          $version = [string]$props.Project.PropertyGroup.Version
-          if ($version -notmatch '^\d+\.\d+\.\d+$') {
-            throw "Invalid product version in Directory.Build.props: $version"
-          }
-          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
-            throw "Release tag $($env:GITHUB_REF_NAME) does not match product version v$version."
-          }
-
-          $stage = Join-Path $env:GITHUB_WORKSPACE 'artifacts/stage'
-          $required = @(
-            'CodexSlotPing.App.exe',
-            'Runner/CodexSlotPing.Runner.exe',
-            'coreclr.dll',
-            'hostfxr.dll',
-            'hostpolicy.dll',
-            'Runner/coreclr.dll',
-            'Runner/hostfxr.dll',
-            'Runner/hostpolicy.dll'
-          )
-          foreach ($relative in $required) {
-            $path = Join-Path $stage $relative
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-              throw "Portable package is missing required file: $relative"
+          $version = '0.3.0'
+          $releaseEligible = 'false'
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            if ($env:GITHUB_REF_NAME -match '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+              $version = $Matches[1] + '.' + $Matches[2] + '.' + $Matches[3]
+              $releaseEligible = 'true'
+            }
+            else {
+              throw "Tag is not a stable vX.Y.Z SemVer: $($env:GITHUB_REF_NAME)"
             }
           }
-
-          $executables = @(Get-ChildItem -LiteralPath $stage -Recurse -File -Filter '*.exe' | ForEach-Object {
-            [IO.Path]::GetRelativePath($stage, $_.FullName).Replace('\', '/')
-          } | Sort-Object)
-          $expectedExecutables = @('CodexSlotPing.App.exe', 'Runner/CodexSlotPing.Runner.exe') | Sort-Object
-          $missingExecutables = @($expectedExecutables | Where-Object { $_ -notin $executables })
-          if ($missingExecutables.Count -gt 0) {
-            throw "Portable package is missing product executables: $($missingExecutables -join ', ')"
-          }
-          $unexpectedExecutables = @($executables | Where-Object {
-            $_ -notin $expectedExecutables -and [IO.Path]::GetFileName($_) -ne 'createdump.exe'
-          })
-          if ($unexpectedExecutables.Count -gt 0) {
-            throw "Unexpected executables in portable package: $($unexpectedExecutables -join ', ')"
-          }
-
-          $pdbFiles = @(Get-ChildItem -LiteralPath $stage -Recurse -File -Filter '*.pdb')
-          if ($pdbFiles.Count -gt 0) {
-            throw "Portable package must not contain PDB files: $($pdbFiles.FullName -join ', ')"
-          }
-
-          $expectedFileVersion = "$version.0"
-          $expectedProductVersion = "$version+$($env:GITHUB_SHA.ToLowerInvariant())"
-          foreach ($relative in @('CodexSlotPing.App.exe', 'Runner/CodexSlotPing.Runner.exe')) {
-            $versionInfo = (Get-Item -LiteralPath (Join-Path $stage $relative)).VersionInfo
-            if ($versionInfo.FileVersion -ne $expectedFileVersion) {
-              throw "$relative FileVersion was '$($versionInfo.FileVersion)', expected '$expectedFileVersion'."
-            }
-            if ($versionInfo.ProductVersion -ne $expectedProductVersion) {
-              throw "$relative ProductVersion was '$($versionInfo.ProductVersion)', expected '$expectedProductVersion'."
-            }
-          }
-
-          $scriptFiles = @(Get-ChildItem -LiteralPath $stage -Recurse -File | Where-Object {
-            $_.Extension -in @('.ps1', '.psm1', '.cmd', '.bat')
-          })
-          if ($scriptFiles.Count -gt 0) {
-            throw 'Portable package must not require a PowerShell or shell wrapper.'
-          }
-
-          $artifactDirectory = Join-Path $env:GITHUB_WORKSPACE 'artifacts'
           $artifactName = "CodexSlotPing-v$version-win-x64"
-          $zipName = "$artifactName.zip"
-          $checksumName = "$zipName.sha256"
-          $zipPath = Join-Path $artifactDirectory $zipName
-          $checksumPath = Join-Path $artifactDirectory $checksumName
-          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -CompressionLevel Optimal
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "version=$version"
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "artifact_name=$artifactName"
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "release_eligible=$releaseEligible"
 
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $archive = [IO.Compression.ZipFile]::OpenRead($zipPath)
-          try {
-            $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
-            foreach ($requiredEntry in @('CodexSlotPing.App.exe', 'Runner/CodexSlotPing.Runner.exe')) {
-              if ($entries -notcontains $requiredEntry) {
-                throw "ZIP is missing required executable: $requiredEntry"
-              }
-            }
-          }
-          finally {
-            $archive.Dispose()
-          }
+      - name: Create portable package through the canonical packager
+        shell: pwsh
+        run: |
+          $archive = "artifacts/ci-package/CodexSlotPing-v${{ steps.package_version.outputs.version }}-win-x64.zip"
+          ./scripts/package-release.ps1 `
+            -Version '${{ steps.package_version.outputs.version }}' `
+            -CommitSha $env:GITHUB_SHA `
+            -OutputDirectory 'artifacts/ci-package'
+          ./scripts/verify-release-package.ps1 `
+            -ArchivePath $archive `
+            -Version '${{ steps.package_version.outputs.version }}' `
+            -CommitSha $env:GITHUB_SHA
 
-          $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          [IO.File]::WriteAllText($checksumPath, "$hash  $zipName`n", [Text.UTF8Encoding]::new($false))
-          $verifiedHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          if (-not (Get-Content -LiteralPath $checksumPath -Raw).StartsWith($verifiedHash)) {
-            throw 'The SHA-256 file does not match the ZIP.'
-          }
+      - name: Exercise the packaged update path
+        shell: pwsh
+        run: |
+          $archive = "artifacts/ci-package/CodexSlotPing-v${{ steps.package_version.outputs.version }}-win-x64.zip"
+          ./scripts/run-release-e2e.ps1 `
+            -ArchivePath $archive `
+            -Version '${{ steps.package_version.outputs.version }}' `
+            -CommitSha $env:GITHUB_SHA
 
-          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "artifact-name=$artifactName"
-          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "zip-path=artifacts/$zipName"
-          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "checksum-path=artifacts/$checksumName"
-
-      - name: Upload ZIP and checksum
+      - name: Upload verified ZIP and SHA-256 sidecar
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.package.outputs.artifact-name }}
-          path: |
-            ${{ steps.package.outputs.zip-path }}
-            ${{ steps.package.outputs.checksum-path }}
+          name: ${{ steps.package_version.outputs.artifact_name }}
+          path: artifacts/ci-package/
           if-no-files-found: error
+          retention-days: 90
+
+  release:
+    if: ${{ github.event_name == 'push' && needs.windows.outputs.release_eligible == 'true' }}
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release notes
+        uses: actions/checkout@v7
+
+      - name: Download verified package artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.windows.outputs.artifact_name }}
+          path: release-assets
+
+      - name: Create draft, upload exact assets, verify remotely, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ needs.windows.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Refusing non-stable release tag: $tag" >&2
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+          if [[ "$version" != "$PACKAGE_VERSION" ]]; then
+            echo "Tag version $version does not match package version $PACKAGE_VERSION." >&2
+            exit 1
+          fi
+
+          zip_name="CodexSlotPing-v${version}-win-x64.zip"
+          sidecar_name="${zip_name}.sha256"
+          zip_path="release-assets/${zip_name}"
+          sidecar_path="release-assets/${sidecar_name}"
+          notes_path="docs/releases/v${version}.md"
+          test -f "$zip_path"
+          test -f "$sidecar_path"
+          test -f "$notes_path"
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "A release already exists for $tag; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --verify-tag \
+            --title "Codex Slot Ping $tag" \
+            --notes-file "$notes_path"
+
+          gh release upload "$tag" "$zip_path" "$sidecar_path" --repo "$GITHUB_REPOSITORY"
+
+          zip_size="$(stat -c '%s' "$zip_path")"
+          sidecar_size="$(stat -c '%s' "$sidecar_path")"
+          metadata="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,assets)"
+          printf '%s' "$metadata" | jq -e \
+            --arg tag "$tag" \
+            --arg zip "$zip_name" \
+            --arg sidecar "$sidecar_name" \
+            --argjson zip_size "$zip_size" \
+            --argjson sidecar_size "$sidecar_size" \
+            '.tagName == $tag and .isDraft and (.assets | length == 2) and
+             any(.assets[]; .name == $zip and .size == $zip_size) and
+             any(.assets[]; .name == $sidecar and .size == $sidecar_size)' >/dev/null
+
+          mkdir -p remote-assets
+          gh release download "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir remote-assets \
+            --pattern "$zip_name" \
+            --pattern "$sidecar_name"
+          cmp --silent "$sidecar_path" "remote-assets/$sidecar_name"
+          (cd remote-assets && sha256sum --check "$sidecar_name")
+          local_hash="$(cut -d ' ' -f 1 "$sidecar_path")"
+          remote_hash="$(sha256sum "remote-assets/$zip_name" | cut -d ' ' -f 1)"
+          if [[ "$local_hash" != "$remote_hash" ]]; then
+            echo 'Downloaded release ZIP digest differs from the verified local package.' >&2
+            exit 1
+          fi
+
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --verify-tag
