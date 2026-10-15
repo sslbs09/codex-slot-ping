@@ -61,6 +61,7 @@ public enum RunnerExitCode
     NoDispatch = 10,
     PrelaunchFailed = 20,
     AttemptedUnconfirmed = 30,
+    UpdateInProgress = 40,
     InvalidArguments = 64,
     UnexpectedFailure = 70
 }

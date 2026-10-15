@@ -40,6 +40,12 @@ internal static class Program
 
         try
         {
+            using var updateAdmission = RunnerUpdateGate.TryEnterForCurrentInstall();
+            if (!updateAdmission.IsAdmitted)
+            {
+                return (int)RunnerExitCode.UpdateInProgress;
+            }
+
             var paths = UserDataPaths.ForCurrentUser();
             var clock = new SystemClock();
             var atomicFile = new AtomicJsonFile(new PhysicalAtomicFileOperations());

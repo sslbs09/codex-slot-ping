@@ -7,5 +7,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodexSlotPing.Core\CodexSlotPing.Core.csproj" />
+    <ProjectReference Include="..\CodexSlotPing.Update\CodexSlotPing.Update.csproj" />
   </ItemGroup>
 </Project>
