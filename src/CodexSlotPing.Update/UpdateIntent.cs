@@ -12,7 +12,8 @@ public sealed record UpdateIntent(
 public enum UpdateIntentCreateStatus
 {
     Created,
-    AlreadyExists
+    AlreadyExists,
+    StorageFailure
 }
 
 public enum UpdateIntentReadStatus

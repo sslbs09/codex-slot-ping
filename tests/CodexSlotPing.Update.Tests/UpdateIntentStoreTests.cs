@@ -36,6 +36,61 @@ public sealed class UpdateIntentStoreTests
     }
 
     [Fact]
+    public void Create_WriteIOException_ReturnsStorageFailureAndRemovesPartialMarker()
+    {
+        using var temp = new TemporaryDirectory();
+        var (identity, paths, _) = CreateStore(temp.Path);
+        var store = CreateStoreWithFailures(
+            paths,
+            path => new WriteFailureStream(OpenCreateNew(path)),
+            _ => { },
+            File.Delete);
+
+        var result = store.Create(CreateIntent(identity, Guid.NewGuid(), processId: 1234));
+
+        Assert.Equal("StorageFailure", result.ToString());
+        Assert.NotEqual(UpdateIntentCreateStatus.AlreadyExists, result);
+        Assert.False(File.Exists(paths.IntentFilePath));
+    }
+
+    [Fact]
+    public void Create_FlushIOException_ReturnsStorageFailureAndRemovesPartialMarker()
+    {
+        using var temp = new TemporaryDirectory();
+        var (identity, paths, _) = CreateStore(temp.Path);
+        var store = CreateStoreWithFailures(
+            paths,
+            OpenCreateNew,
+            _ => throw new IOException("simulated flush failure"),
+            File.Delete);
+
+        var result = store.Create(CreateIntent(identity, Guid.NewGuid(), processId: 1234));
+
+        Assert.Equal("StorageFailure", result.ToString());
+        Assert.NotEqual(UpdateIntentCreateStatus.AlreadyExists, result);
+        Assert.False(File.Exists(paths.IntentFilePath));
+    }
+
+    [Fact]
+    public void Create_WriteFailureAndCleanupFailure_LeavesInvalidMarkerForRunnerFailClosed()
+    {
+        using var temp = new TemporaryDirectory();
+        var (identity, paths, _) = CreateStore(temp.Path);
+        var store = CreateStoreWithFailures(
+            paths,
+            path => new WriteFailureStream(OpenCreateNew(path)),
+            _ => { },
+            _ => throw new IOException("simulated cleanup failure"));
+
+        var result = store.Create(CreateIntent(identity, Guid.NewGuid(), processId: 1234));
+
+        Assert.Equal("StorageFailure", result.ToString());
+        Assert.NotEqual(UpdateIntentCreateStatus.AlreadyExists, result);
+        Assert.True(File.Exists(paths.IntentFilePath));
+        Assert.Equal(UpdateIntentReadStatus.Invalid, store.Read().Status);
+    }
+
+    [Fact]
     public async Task ConcurrentCreators_ExactlyOneWinsWithoutReplacingWinner()
     {
         using var temp = new TemporaryDirectory();
@@ -122,6 +177,21 @@ public sealed class UpdateIntentStoreTests
         return (identity, paths, new UpdateIntentStore(paths));
     }
 
+    private static UpdateIntentStore CreateStoreWithFailures(
+        UpdateControlPaths paths,
+        Func<string, Stream> createNew,
+        Action<Stream> flushToDisk,
+        Action<string> deleteFile) =>
+        new(paths, createNew, flushToDisk, deleteFile);
+
+    private static Stream OpenCreateNew(string path) => new FileStream(
+        path,
+        FileMode.CreateNew,
+        FileAccess.Write,
+        FileShare.None,
+        bufferSize: 4096,
+        FileOptions.WriteThrough);
+
     private static UpdateIntent CreateIntent(InstallIdentity identity, Guid operationId, int processId) => new(
         1,
         "CodexSlotPing",
@@ -174,6 +244,30 @@ public sealed class UpdateIntentStoreTests
             {
                 Directory.Delete(Path, recursive: true);
             }
+        }
+    }
+
+    private sealed class WriteFailureStream(Stream inner) : Stream
+    {
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => inner.CanWrite;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => inner.Position = value; }
+        public override void Flush() => inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+        public override void SetLength(long value) => inner.SetLength(value);
+        public override void Write(byte[] buffer, int offset, int count) => throw new IOException("simulated write failure");
+        public override void Write(ReadOnlySpan<byte> buffer) => throw new IOException("simulated write failure");
+        public override void WriteByte(byte value) => throw new IOException("simulated write failure");
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                inner.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 }

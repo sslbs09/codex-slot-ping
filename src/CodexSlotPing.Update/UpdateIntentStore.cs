@@ -12,6 +12,21 @@ public sealed class UpdateIntentStore(UpdateControlPaths paths) : IUpdateIntentR
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
+    private readonly Func<string, Stream> _createNew = OpenCreateNew;
+    private readonly Action<Stream> _flushToDisk = FlushToDisk;
+    private readonly Action<string> _deleteFile = File.Delete;
+
+    internal UpdateIntentStore(
+        UpdateControlPaths paths,
+        Func<string, Stream> createNew,
+        Action<Stream> flushToDisk,
+        Action<string> deleteFile) : this(paths)
+    {
+        _createNew = createNew ?? throw new ArgumentNullException(nameof(createNew));
+        _flushToDisk = flushToDisk ?? throw new ArgumentNullException(nameof(flushToDisk));
+        _deleteFile = deleteFile ?? throw new ArgumentNullException(nameof(deleteFile));
+    }
+
     public UpdateIntentCreateStatus Create(UpdateIntent intent)
     {
         ArgumentNullException.ThrowIfNull(intent);
@@ -19,23 +34,42 @@ public sealed class UpdateIntentStore(UpdateControlPaths paths) : IUpdateIntentR
 
         return WithMutationLock(() =>
         {
-            Directory.CreateDirectory(paths.DirectoryPath);
             try
             {
-                using var stream = new FileStream(
-                    paths.IntentFilePath,
-                    FileMode.CreateNew,
-                    FileAccess.Write,
-                    FileShare.None,
-                    bufferSize: 4096,
-                    FileOptions.WriteThrough);
-                JsonSerializer.Serialize(stream, intent, WriteOptions);
-                stream.Flush(flushToDisk: true);
-                return UpdateIntentCreateStatus.Created;
+                Directory.CreateDirectory(paths.DirectoryPath);
             }
-            catch (IOException) when (File.Exists(paths.IntentFilePath))
+            catch (Exception exception) when (IsStorageFailure(exception))
+            {
+                return UpdateIntentCreateStatus.StorageFailure;
+            }
+
+            Stream stream;
+            try
+            {
+                stream = _createNew(paths.IntentFilePath);
+            }
+            catch (IOException exception) when (IsAlreadyExists(exception))
             {
                 return UpdateIntentCreateStatus.AlreadyExists;
+            }
+            catch (Exception exception) when (IsStorageFailure(exception))
+            {
+                return UpdateIntentCreateStatus.StorageFailure;
+            }
+
+            try
+            {
+                using (stream)
+                {
+                    JsonSerializer.Serialize(stream, intent, WriteOptions);
+                    _flushToDisk(stream);
+                }
+                return UpdateIntentCreateStatus.Created;
+            }
+            catch (Exception exception) when (IsStorageFailure(exception))
+            {
+                TryDeletePartialMarker();
+                return UpdateIntentCreateStatus.StorageFailure;
             }
         });
     }
@@ -151,6 +185,33 @@ public sealed class UpdateIntentStore(UpdateControlPaths paths) : IUpdateIntentR
             throw new ArgumentException("The update intent is invalid or belongs to another install.", nameof(intent));
         }
     }
+
+    private void TryDeletePartialMarker()
+    {
+        try
+        {
+            _deleteFile(paths.IntentFilePath);
+        }
+        catch (Exception exception) when (IsStorageFailure(exception))
+        {
+            // A remaining partial marker is invalid and causes Runner admission to fail closed.
+        }
+    }
+
+    private static Stream OpenCreateNew(string path) => new FileStream(
+        path,
+        FileMode.CreateNew,
+        FileAccess.Write,
+        FileShare.None,
+        bufferSize: 4096,
+        FileOptions.WriteThrough);
+
+    private static void FlushToDisk(Stream stream) => ((FileStream)stream).Flush(flushToDisk: true);
+
+    private static bool IsAlreadyExists(IOException exception) => (exception.HResult & 0xFFFF) is 17 or 80 or 183;
+
+    private static bool IsStorageFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or JsonException;
 
     private T WithMutationLock<T>(Func<T> action)
     {
