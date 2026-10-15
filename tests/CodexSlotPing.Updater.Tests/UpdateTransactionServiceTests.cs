@@ -359,32 +359,27 @@ public sealed partial class UpdateTransactionServiceTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_CopiesFromDifferentVolumeAndRenamesOnlyInstallSiblings()
+    public async Task ExecuteAsync_CopiesStageToInstallParentSiblingAndRenamesOnlyInstallSiblings()
     {
         using var fixture = new TransactionFixture();
         fixture.PublishIntent();
         fixture.Acknowledgement = StartupAcknowledgementWaitResult.Received(fixture.CreateAcknowledgement(fixture.Runtime.NewAppIdentity));
-        var installVolume = Path.GetPathRoot(fixture.InstallRoot);
-        var otherDrive = DriveInfo.GetDrives().FirstOrDefault(drive => drive.IsReady &&
-            !string.Equals(drive.RootDirectory.FullName, installVolume, StringComparison.OrdinalIgnoreCase));
-        Assert.NotNull(otherDrive);
-        var externalOperationRoot = Path.Combine(otherDrive!.RootDirectory.FullName, "CodexSlotPing-UpdateTest-" + Guid.NewGuid().ToString("N"));
-        var externalStage = Path.Combine(externalOperationRoot, "extract");
-        try
-        {
-            TransactionFixture.WriteExternalPackage(externalStage, "0.3.1", "external-stage");
-            var invocation = fixture.Invocation with { VerifiedExtractRoot = externalStage };
 
-            var result = await fixture.CreateService(externalStage).ExecuteAsync(invocation);
+        var result = await fixture.CreateService().ExecuteAsync(fixture.Invocation);
 
-            Assert.Equal(UpdaterResultCode.Success, result.Code);
-            Assert.All(fixture.FileSystem.Moves, move =>
-                Assert.Equal(Path.GetPathRoot(move.Source), Path.GetPathRoot(move.Destination), StringComparer.OrdinalIgnoreCase));
-        }
-        finally
+        Assert.Equal(UpdaterResultCode.Success, result.Code);
+        Assert.Equal(new[] { (fixture.StageRoot, fixture.Siblings.NewSiblingPath) }, fixture.FileSystem.Copies);
+        Assert.Equal(2, fixture.FileSystem.Moves.Count);
+        Assert.Contains(fixture.FileSystem.Moves, move => PathsEqual(move.Source, fixture.InstallRoot) &&
+            PathsEqual(move.Destination, fixture.Siblings.BackupSiblingPath));
+        Assert.Contains(fixture.FileSystem.Moves, move => PathsEqual(move.Source, fixture.Siblings.NewSiblingPath) &&
+            PathsEqual(move.Destination, fixture.InstallRoot));
+        Assert.DoesNotContain(fixture.FileSystem.Moves, move => PathsEqual(move.Source, fixture.StageRoot));
+        Assert.All(fixture.FileSystem.Moves, move =>
         {
-            if (Directory.Exists(externalOperationRoot)) Directory.Delete(externalOperationRoot, recursive: true);
-        }
+            Assert.True(PathsEqual(fixture.InstallParent, Path.GetDirectoryName(move.Source)!));
+            Assert.True(PathsEqual(fixture.InstallParent, Path.GetDirectoryName(move.Destination)!));
+        });
     }
 
     private static bool PathsEqual(string left, string right) =>
@@ -533,6 +528,7 @@ public sealed partial class UpdateTransactionServiceTests
         public Func<string, string, bool>? FailMove { get; set; }
         public ManualResetEventSlim? CopyStarted { get; set; }
         public ManualResetEventSlim? AllowCopy { get; set; }
+        public List<(string Source, string Destination)> Copies { get; } = [];
         public List<(string Source, string Destination)> Moves { get; } = [];
         public bool DirectoryExists(string path) => Directory.Exists(path);
         public bool FileExists(string path) => File.Exists(path);
@@ -543,6 +539,7 @@ public sealed partial class UpdateTransactionServiceTests
         }
         public void CopyPackage(string sourceRoot, string destinationRoot, IReadOnlyList<string> relativeFiles)
         {
+            Copies.Add((sourceRoot, destinationRoot));
             Directory.CreateDirectory(destinationRoot);
             foreach (var relative in relativeFiles)
             {
