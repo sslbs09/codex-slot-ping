@@ -71,7 +71,7 @@ public sealed class AppUpdateStartupCoordinator
         {
             if (parsed.OperationId is { } operationId && parsed.IsRollback)
             {
-                return ValidateRollback(operationId, intentMayBeMissing: true);
+                return ValidateRollback(operationId);
             }
             return parsed.OperationId is null && !parsed.IsRollback
                 ? new(AppUpdateStartupMode.Normal)
@@ -88,7 +88,7 @@ public sealed class AppUpdateStartupCoordinator
         if (parsed.OperationId is { } requestedOperation)
         {
             if (requestedOperation != intent.OperationId) return Required("update-operation-mismatch");
-            if (parsed.IsRollback) return ValidateRollback(requestedOperation, intentMayBeMissing: false, journalRead.Journal);
+            if (parsed.IsRollback) return ValidateRollback(requestedOperation, journalRead.Journal);
             if (_processProbe.Match(intent) != UpdaterProcessMatch.Matching) return Required("updater-identity-mismatch");
             return ValidateUpdateStartup(requestedOperation, journalRead);
         }
@@ -164,7 +164,7 @@ public sealed class AppUpdateStartupCoordinator
             : Required("update-startup-package-mismatch");
     }
 
-    private AppUpdateStartupResult ValidateRollback(Guid operationId, bool intentMayBeMissing, UpdateTransactionJournal? knownJournal = null)
+    private AppUpdateStartupResult ValidateRollback(Guid operationId, UpdateTransactionJournal? knownJournal = null)
     {
         var journalRead = knownJournal is null ? _journalStore.Read(operationId) : UpdateTransactionJournalReadResult.Active(knownJournal);
         var journal = journalRead.Journal;
@@ -173,7 +173,7 @@ public sealed class AppUpdateStartupCoordinator
             string.Equals(intentRead.Intent.InstallIdentity, _identity.Key, StringComparison.Ordinal);
         if (journalRead.Status != UpdateTransactionJournalReadStatus.Active || journal is null ||
             journal.Phase != UpdateTransactionPhase.RolledBack || !JournalMatchesInstall(journal) ||
-            (!matchingIntent && !(intentMayBeMissing && intentRead.Status == UpdateIntentReadStatus.Missing)) ||
+            (!matchingIntent && intentRead.Status != UpdateIntentReadStatus.Missing) ||
             !SemVersion.TryParse(journal.TargetVersion, out var target))
         {
             return Required("rollback-startup-unverified");

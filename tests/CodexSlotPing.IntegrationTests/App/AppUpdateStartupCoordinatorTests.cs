@@ -149,6 +149,23 @@ public sealed class AppUpdateStartupCoordinatorTests
     }
 
     [Fact]
+    public async Task RollbackOperationArgument_AllowsUpdaterToClearIntentDuringStartup()
+    {
+        using var fixture = new Fixture();
+        Fixture.WritePackage(fixture.InstallRoot, "0.3.0");
+        fixture.WriteIntent(fixture.OperationId);
+        fixture.WriteJournal(fixture.OperationId, "0.3.1", UpdateTransactionPhase.RolledBack);
+        var intentStore = new DeleteIntentOnSecondReadStore(fixture.IntentStore, fixture.OperationId);
+        var coordinator = new AppUpdateStartupCoordinator(fixture.Identity, fixture.Paths, intentStore,
+            fixture.JournalStore, fixture.Probe, fixture.Launcher, fixture.AppIdentity, fixture.UpdatesRoot);
+
+        var result = await coordinator.ResolveAsync(["--update-rollback", fixture.OperationId.ToString("D")]);
+
+        Assert.Equal(AppUpdateStartupMode.RollbackNotice, result.Mode);
+        Assert.Equal(UpdateIntentReadStatus.Missing, fixture.IntentStore.Read().Status);
+    }
+
+    [Fact]
     public async Task IncompleteTransaction_LaunchesUpdaterOnlyFromMatchingVerifiedStaging()
     {
         using var fixture = new Fixture();
@@ -234,6 +251,7 @@ public sealed class AppUpdateStartupCoordinatorTests
 
         public Guid OperationId { get; } = Guid.NewGuid();
         public string InstallRoot { get; }
+        public string UpdatesRoot => _updatesRoot;
         public InstallIdentity Identity { get; }
         public UpdateControlPaths Paths { get; }
         public UpdateIntentStore IntentStore { get; }
@@ -283,6 +301,22 @@ public sealed class AppUpdateStartupCoordinatorTests
             OnMatch?.Invoke(intent);
             return MatchResult;
         }
+    }
+
+    private sealed class DeleteIntentOnSecondReadStore(IUpdateIntentLifecycle inner, Guid operationId) : IUpdateIntentLifecycle
+    {
+        private int _reads;
+
+        public UpdateIntentReadResult Read()
+        {
+            if (Interlocked.Increment(ref _reads) == 2) inner.TryDelete(operationId);
+            return inner.Read();
+        }
+
+        public UpdateIntentCreateStatus Create(UpdateIntent intent) => inner.Create(intent);
+        public bool TryDelete(Guid id) => inner.TryDelete(id);
+        public bool TryDelete(Guid id, ProcessIdentity expectedUpdater) => inner.TryDelete(id, expectedUpdater);
+        public bool TryUpdateOwner(Guid id, ProcessIdentity updater) => inner.TryUpdateOwner(id, updater);
     }
 
     private sealed class FakeLauncher : IUpdaterHandoffLauncher

@@ -49,8 +49,7 @@ public partial class App : System.Windows.Application
             if (startup.Mode is AppUpdateStartupMode.RecoveryUpdaterLaunched)
             {
                 ReleaseSingleInstance();
-                ShowStartupMessage("Update.RecoveryStarting");
-                Shutdown();
+                await ShowRecoveryStartingNoticeAndExitAsync();
                 return;
             }
             if (startup.Mode is AppUpdateStartupMode.RecoveryRequired)
@@ -121,6 +120,31 @@ public partial class App : System.Windows.Application
 
     private static void ShowStartupMessage(string resourceKey) =>
         WpfMessageBox.Show(UiText.Get(resourceKey), "Codex Slot Ping", MessageBoxButton.OK, MessageBoxImage.Warning);
+
+    private async Task ShowRecoveryStartingNoticeAndExitAsync()
+    {
+        var notice = new Window
+        {
+            Title = "Codex Slot Ping",
+            Content = new System.Windows.Controls.TextBlock
+            {
+                Text = UiText.Get("Update.RecoveryStarting"),
+                TextWrapping = System.Windows.TextWrapping.Wrap,
+                Margin = new Thickness(24),
+                VerticalAlignment = VerticalAlignment.Center
+            },
+            Width = 440,
+            Height = 140,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            ShowInTaskbar = true,
+            Topmost = true
+        };
+        MainWindow = notice;
+        notice.Show();
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        Shutdown();
+    }
 
     private static ProcessIdentity GetCurrentProcessIdentity()
     {
