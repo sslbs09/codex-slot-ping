@@ -293,4 +293,3 @@ public sealed class ReleaseArtifactE2ETests
         }
     }
 }
-
