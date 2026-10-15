@@ -39,3 +39,8 @@ public interface IUpdateIntentReader
 {
     UpdateIntentReadResult Read();
 }
+
+public interface IUpdateIntentLifecycle : IUpdateIntentReader
+{
+    bool TryDelete(Guid operationId);
+}

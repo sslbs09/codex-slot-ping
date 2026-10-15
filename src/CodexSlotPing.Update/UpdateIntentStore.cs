@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace CodexSlotPing.Update;
 
-public sealed class UpdateIntentStore(UpdateControlPaths paths) : IUpdateIntentReader
+public sealed class UpdateIntentStore(UpdateControlPaths paths) : IUpdateIntentLifecycle
 {
     private static readonly HashSet<string> RequiredProperties = new(
         ["schemaVersion", "productId", "installIdentity", "operationId", "updaterPid", "updaterStartedUtc", "createdUtc"],

@@ -16,7 +16,10 @@ public sealed record UpdateControlPaths
     public string InstallIdentity { get; }
     public string IntentFilePath => Path.Combine(DirectoryPath, "intent.json");
     public string IntentMutationMutexName { get; }
+    public string UpdaterExecutionLockFilePath => Path.Combine(DirectoryPath, "updater.lock");
     public string LeaseFilePath => Path.Combine(DirectoryPath, "lease");
+    public string JournalFilePath(Guid operationId) => Path.Combine(DirectoryPath, $"{operationId:N}.journal.json");
+    public string StartupAcknowledgementFilePath(Guid operationId) => Path.Combine(DirectoryPath, $"{operationId:N}.ack");
 
     public static UpdateControlPaths ForInstall(string localAppDataRoot, InstallIdentity identity)
     {

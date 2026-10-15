@@ -28,10 +28,18 @@ public sealed record InstallIdentity
         {
             throw new ArgumentException("The install root must be an absolute path.", nameof(installRoot));
         }
+        if (OperatingSystem.IsWindows() && IsDevicePath(installRoot))
+        {
+            throw new ArgumentException("Windows device paths are not supported for install identity.", nameof(installRoot));
+        }
 
         var normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(installRoot));
         var identityInput = $"{ProductIdValue.ToUpperInvariant()}\n{normalizedRoot.ToUpperInvariant()}";
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identityInput)));
         return new InstallIdentity(ProductIdValue, normalizedRoot, key);
     }
+
+    private static bool IsDevicePath(string path) =>
+        path.StartsWith(@"\\?\", StringComparison.Ordinal) ||
+        path.StartsWith(@"\\.\", StringComparison.Ordinal);
 }
