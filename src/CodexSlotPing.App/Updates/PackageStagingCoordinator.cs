@@ -71,7 +71,7 @@ public sealed class PackageStagingCoordinator
         {
             var versionRoot = Path.Combine(_updatesRoot, targetVersion!.ToString());
             Directory.CreateDirectory(versionRoot);
-            var operationId = Guid.NewGuid().ToString("N");
+            var operationId = Guid.NewGuid().ToString("D");
             var candidateOperationRoot = Path.Combine(versionRoot, operationId);
             if (Directory.Exists(candidateOperationRoot) || File.Exists(candidateOperationRoot))
             {

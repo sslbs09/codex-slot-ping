@@ -42,6 +42,7 @@ public sealed class PackageStagingCoordinatorTests
         Assert.True(result.IsReady);
         var descriptor = Assert.IsType<ReadyToInstallDescriptor>(result.Descriptor);
         Assert.Equal(Version, descriptor.Version);
+        Assert.True(Guid.TryParseExact(descriptor.OperationId, "D", out _), "Updater handoff requires the operation ID in canonical D format.");
         Assert.True(File.Exists(descriptor.VerifiedZipPath));
         Assert.True(File.Exists(descriptor.VerifiedSidecarPath));
         Assert.True(File.Exists(Path.Combine(descriptor.VerifiedExtractPath, "CodexSlotPing.App.exe")));
