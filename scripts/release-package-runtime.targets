@@ -1,0 +1,14 @@
+<Project>
+  <Target
+    Name="RemoveFrameworkFilesOwnedByPortableApp"
+    AfterTargets="ComputeResolvedFilesToPublishList"
+    Condition="'$(CspPackageSharedRuntime)' == 'true'
+      and '$(MSBuildProjectName)' != 'CodexSlotPing.App'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(ResolvedFileToPublish.RelativePath)' == 'WindowsBase.dll'
+          or '%(ResolvedFileToPublish.RelativePath)' == 'System.Drawing.dll'
+          or '%(ResolvedFileToPublish.RelativePath)' == 'Microsoft.VisualBasic.dll'" />
+    </ItemGroup>
+  </Target>
+</Project>
