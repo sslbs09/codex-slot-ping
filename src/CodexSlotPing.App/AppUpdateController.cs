@@ -11,16 +11,20 @@ public sealed class AppUpdateController
     private static readonly HttpClient SharedHttpClient = new();
     private readonly UpdateCheckCoordinator _coordinator;
     private readonly PackageStagingCoordinator? _packageStagingCoordinator;
+    private readonly UpdateHandoffCoordinator? _handoffCoordinator;
     private readonly string _currentVersion;
     private UpdateEvaluation? _lastEvaluation;
+    private int _installInProgress;
 
     public AppUpdateController(
         UpdateCheckCoordinator coordinator,
         string currentVersion,
-        PackageStagingCoordinator? packageStagingCoordinator = null)
+        PackageStagingCoordinator? packageStagingCoordinator = null,
+        UpdateHandoffCoordinator? handoffCoordinator = null)
     {
         _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
         _packageStagingCoordinator = packageStagingCoordinator;
+        _handoffCoordinator = handoffCoordinator;
         ArgumentException.ThrowIfNullOrWhiteSpace(currentVersion);
         _currentVersion = currentVersion;
         CurrentState = UpdateReadModel.Unknown(currentVersion);
@@ -43,9 +47,19 @@ public sealed class AppUpdateController
         var packageStaging = new PackageStagingCoordinator(
             new UpdatePackageDownloader(downloadHttpClient),
             new PackageArchiveExtractor(new WindowsPackageFileVersionInspector()));
+        var identity = InstallIdentity.Create(InstallIdentity.ProductIdValue, AppContext.BaseDirectory);
+        var updatePaths = UpdateControlPaths.ForCurrentUser(identity);
+        var handoff = new UpdateHandoffCoordinator(
+            updatePaths,
+            new UpdateIntentStore(updatePaths),
+            new UpdateHandoffReadyStore(updatePaths),
+            new SystemUpdaterHandoffLauncher());
         var version = typeof(App).Assembly.GetName().Version ?? new Version(0, 2, 0, 0);
-        var currentVersion = $"{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
-        return new AppUpdateController(coordinator, currentVersion, packageStaging);
+        var package = PackageDirectoryValidator.ValidateDirectory(AppContext.BaseDirectory);
+        var currentVersion = package.IsValid && package.Version is not null
+            ? package.Version.ToString()
+            : $"{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
+        return new AppUpdateController(coordinator, currentVersion, packageStaging, handoff);
     }
 
     public async Task<UpdateReadModel> CheckForUpdatesAsync(
@@ -67,6 +81,69 @@ public sealed class AppUpdateController
             SetState(UpdateReadModel.Unknown(_currentVersion));
             throw;
         }
+        catch (Exception)
+        {
+            var failed = UpdateReadModel.Failed(_currentVersion, null, UpdateFailureCategory.Network);
+            SetState(failed);
+            return failed;
+        }
+    }
+
+    public async Task<UpdateHandoffResult> InstallAndRestartAsync(
+        string installRoot,
+        ProcessIdentity appIdentity,
+        Func<bool> testNowIsRunning,
+        CancellationToken cancellationToken = default)
+    {
+        var descriptor = ReadyToInstallPackage;
+        if (descriptor is null || CurrentState.Status is not UpdateViewStatus.ReadyToInstall and not UpdateViewStatus.Failed ||
+            _handoffCoordinator is null)
+        {
+            return new(UpdateHandoffStatus.InvalidStagedPackage);
+        }
+        if (Interlocked.CompareExchange(ref _installInProgress, 1, 0) != 0)
+        {
+            return new(UpdateHandoffStatus.AlreadyInstalling);
+        }
+
+        var previous = CurrentState;
+        UpdateHandoffResult result;
+        try
+        {
+            result = await _handoffCoordinator.BeginAsync(
+                descriptor,
+                installRoot,
+                appIdentity,
+                testNowIsRunning,
+                () => SetState(UpdateReadModel.Installing(previous)),
+                cancellationToken).ConfigureAwait(true);
+        }
+        catch
+        {
+            Volatile.Write(ref _installInProgress, 0);
+            SetState(previous with { Status = UpdateViewStatus.Failed, ErrorCategory = UpdateFailureCategory.UpdaterBootstrapFailure });
+            throw;
+        }
+
+        if (result.Status is UpdateHandoffStatus.Ready)
+        {
+            return result;
+        }
+
+        if (result.Status is UpdateHandoffStatus.TestNowRunning)
+        {
+            Volatile.Write(ref _installInProgress, 0);
+            return result;
+        }
+
+        Volatile.Write(ref _installInProgress, 0);
+        SetState(previous with
+        {
+            Status = UpdateViewStatus.Failed,
+            ErrorCategory = UpdateFailureCategory.UpdaterBootstrapFailure,
+            DownloadProgressPercent = null
+        });
+        return result;
     }
 
     public async Task<PackageStagingResult> DownloadUpdateAsync(CancellationToken cancellationToken = default)

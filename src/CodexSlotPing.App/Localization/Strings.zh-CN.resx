@@ -138,6 +138,9 @@
   <data name="Tray.AutomationControlLabel" xml:space="preserve"><value>自动化控制状态</value></data>
   <data name="Tray.SchedulerState" xml:space="preserve"><value>计划任务：{0}</value></data>
   <data name="Tray.WakeComputer" xml:space="preserve"><value>唤醒电脑</value></data>
+  <data name="Tray.UpdateAvailable" xml:space="preserve"><value>更新可用…</value></data>
+  <data name="Tray.UpdateNotificationTitle" xml:space="preserve"><value>Codex Slot Ping 更新</value></data>
+  <data name="Tray.UpdateNotificationBody" xml:space="preserve"><value>版本 {0} 已发布。打开应用查看详情。</value></data>
   <data name="Tray.OpenLogs" xml:space="preserve"><value>打开日志</value></data>
   <data name="Tray.Exit" xml:space="preserve"><value>退出</value></data>
   <data name="Automation.State.Enabled" xml:space="preserve"><value>已启用</value></data>
@@ -178,9 +181,25 @@
   <data name="Update.Unknown" xml:space="preserve"><value>尚未检查。</value></data>
   <data name="Update.Checking" xml:space="preserve"><value>正在检查 GitHub Releases…</value></data>
   <data name="Update.UpToDate" xml:space="preserve"><value>当前版本 {0} 已是最新稳定版。</value></data>
-  <data name="Update.Available" xml:space="preserve"><value>发现可用版本 {0}。</value></data>
+  <data name="Update.Available" xml:space="preserve"><value>当前版本 {0}；发现可用版本 {1}。</value></data>
+  <data name="Update.AvailableBanner" xml:space="preserve"><value>更新可用：{0}</value></data>
+  <data name="Update.ReadyBanner" xml:space="preserve"><value>更新已准备安装：{0}</value></data>
   <data name="Update.Downloading" xml:space="preserve"><value>正在下载更新{0}…</value></data>
   <data name="Update.ReadyToInstall" xml:space="preserve"><value>版本 {0} 已下载并验证，可进行安装。</value></data>
+  <data name="Update.Installing" xml:space="preserve"><value>正在准备更新，应用即将关闭并重新启动。</value></data>
+  <data name="Update.InstallAndRestart" xml:space="preserve"><value>安装并重新启动</value></data>
+  <data name="Update.RetryInstall" xml:space="preserve"><value>重试安装</value></data>
+  <data name="Update.InstallConfirmTitle" xml:space="preserve"><value>安装更新并重新启动？</value></data>
+  <data name="Update.InstallConfirmBody" xml:space="preserve"><value>Codex Slot Ping 将关闭并重新启动以安装更新。若自动 Runner 正在执行，更新可能等待其完成。不会强制终止 Codex 请求。是否继续？</value></data>
+  <data name="Update.TestNowRunning" xml:space="preserve"><value>立即测试请求正在运行。请等待结果完成后再安装更新。</value></data>
+  <data name="Update.BootstrapFailed" xml:space="preserve"><value>更新程序无法准备交接。应用仍保持打开，可稍后在设置中重试。</value></data>
+  <data name="Update.Error.Bootstrap" xml:space="preserve"><value>更新程序无法准备交接</value></data>
+  <data name="Update.InProgress" xml:space="preserve"><value>更新已在进行中。此应用实例将关闭，不会更改自动化设置。</value></data>
+  <data name="Update.RecoveryStarting" xml:space="preserve"><value>正在恢复中断的更新。应用将关闭，由更新程序检查安装状态。</value></data>
+  <data name="Update.RecoveryRequired" xml:space="preserve"><value>更新状态需要恢复。应用不会启动自动化；请保留更新文件并联系支持。</value></data>
+  <data name="Update.UpdatedTo" xml:space="preserve"><value>已更新到版本 {0}。</value></data>
+  <data name="Update.RolledBack" xml:space="preserve"><value>更新失败，已恢复上一版本。</value></data>
+  <data name="Update.CleanupWarning" xml:space="preserve"><value>更新已成功，但部分备份文件需要手动清理。</value></data>
   <data name="Update.Failed" xml:space="preserve"><value>检查更新失败（{0}）。</value></data>
   <data name="Update.Error.Network" xml:space="preserve"><value>网络不可用</value></data>
   <data name="Update.Error.Timeout" xml:space="preserve"><value>请求超时</value></data>

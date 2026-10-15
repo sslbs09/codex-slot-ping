@@ -138,6 +138,9 @@
   <data name="Tray.AutomationControlLabel" xml:space="preserve"><value>Automation control</value></data>
   <data name="Tray.SchedulerState" xml:space="preserve"><value>Scheduler state: {0}</value></data>
   <data name="Tray.WakeComputer" xml:space="preserve"><value>Wake computer</value></data>
+  <data name="Tray.UpdateAvailable" xml:space="preserve"><value>Update available…</value></data>
+  <data name="Tray.UpdateNotificationTitle" xml:space="preserve"><value>Codex Slot Ping update</value></data>
+  <data name="Tray.UpdateNotificationBody" xml:space="preserve"><value>Version {0} is available. Open the app to review it.</value></data>
   <data name="Tray.OpenLogs" xml:space="preserve"><value>Open logs</value></data>
   <data name="Tray.Exit" xml:space="preserve"><value>Exit</value></data>
   <data name="Automation.State.Enabled" xml:space="preserve"><value>Enabled</value></data>
@@ -178,9 +181,25 @@
   <data name="Update.Unknown" xml:space="preserve"><value>Not checked yet.</value></data>
   <data name="Update.Checking" xml:space="preserve"><value>Checking GitHub Releases…</value></data>
   <data name="Update.UpToDate" xml:space="preserve"><value>You are using version {0}; no newer stable release is available.</value></data>
-  <data name="Update.Available" xml:space="preserve"><value>Version {0} is available.</value></data>
+  <data name="Update.Available" xml:space="preserve"><value>Current version {0}; version {1} is available.</value></data>
+  <data name="Update.AvailableBanner" xml:space="preserve"><value>Update available: {0}</value></data>
+  <data name="Update.ReadyBanner" xml:space="preserve"><value>Update ready to install: {0}</value></data>
   <data name="Update.Downloading" xml:space="preserve"><value>Downloading update{0}…</value></data>
   <data name="Update.ReadyToInstall" xml:space="preserve"><value>Version {0} is downloaded and verified. It is ready to install.</value></data>
+  <data name="Update.Installing" xml:space="preserve"><value>Preparing the update. The app will close and restart.</value></data>
+  <data name="Update.InstallAndRestart" xml:space="preserve"><value>Install and restart</value></data>
+  <data name="Update.RetryInstall" xml:space="preserve"><value>Retry install</value></data>
+  <data name="Update.InstallConfirmTitle" xml:space="preserve"><value>Install update and restart?</value></data>
+  <data name="Update.InstallConfirmBody" xml:space="preserve"><value>Codex Slot Ping will close and restart to install this update. If an automatic Runner is active, the update may wait for it to finish. Codex requests will not be force-terminated. Continue?</value></data>
+  <data name="Update.TestNowRunning" xml:space="preserve"><value>Test Now is currently running. Wait for its result before installing the update.</value></data>
+  <data name="Update.BootstrapFailed" xml:space="preserve"><value>The updater could not prepare the update. The app is still open; you can retry from Settings.</value></data>
+  <data name="Update.Error.Bootstrap" xml:space="preserve"><value>updater could not prepare the handoff</value></data>
+  <data name="Update.InProgress" xml:space="preserve"><value>An update is already in progress. This app instance will close without changing automation settings.</value></data>
+  <data name="Update.RecoveryStarting" xml:space="preserve"><value>An interrupted update is being recovered. This app will close while the updater checks the installation.</value></data>
+  <data name="Update.RecoveryRequired" xml:space="preserve"><value>The update state needs recovery. The app will not start automation; keep the update files and contact support.</value></data>
+  <data name="Update.UpdatedTo" xml:space="preserve"><value>Updated to version {0}.</value></data>
+  <data name="Update.RolledBack" xml:space="preserve"><value>Update failed; the previous version was restored.</value></data>
+  <data name="Update.CleanupWarning" xml:space="preserve"><value>The update succeeded, but some backup files need manual cleanup.</value></data>
   <data name="Update.Failed" xml:space="preserve"><value>Update check failed ({0}).</value></data>
   <data name="Update.Error.Network" xml:space="preserve"><value>network unavailable</value></data>
   <data name="Update.Error.Timeout" xml:space="preserve"><value>request timed out</value></data>

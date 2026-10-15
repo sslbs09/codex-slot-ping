@@ -42,6 +42,8 @@ public sealed class AppController
     private readonly SemaphoreSlim _automationOperationGate = new(1, 1);
     private int _testNowActive;
 
+    public bool IsTestNowRunning => Volatile.Read(ref _testNowActive) != 0;
+
     public AppController(
         IClock clock,
         ITimeZoneProvider timeZoneProvider,

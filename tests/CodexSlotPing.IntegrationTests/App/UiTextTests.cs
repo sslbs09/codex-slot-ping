@@ -174,7 +174,7 @@ public sealed class UiTextTests
             CultureInfo.CurrentUICulture = Chinese;
             Assert.Equal(
                 ["打开", "立即测试", "自动化状态", "自动化控制状态", "计划任务", "唤醒电脑",
-                    "暂停自动调度", "设置", "打开日志", "退出"],
+                    "暂停自动调度", "更新可用…", "设置", "打开日志", "退出"],
                 TrayIconController.MenuEntryNames);
         }
         finally
@@ -183,5 +183,34 @@ public sealed class UiTextTests
         }
 
         Assert.Equal("计划任务：未启用", UiText.FormatTraySchedulerState(SchedulerViewState.Disabled, Chinese));
+        Assert.Equal("安装并重新启动", UiText.Get("Update.InstallAndRestart", Chinese));
+        Assert.Equal("Install and restart", UiText.Get("Update.InstallAndRestart", CultureInfo.GetCultureInfo("en-US")));
+        Assert.Equal("已更新到版本 0.3.1。", string.Format(Chinese, UiText.Get("Update.UpdatedTo", Chinese), "0.3.1"));
+    }
+
+    [Fact]
+    public void UpdateConfirmationAndRecoveryMessagesAreLocalized()
+    {
+        var english = CultureInfo.GetCultureInfo("en-US");
+        var confirmation = UiText.Get("Update.InstallConfirmBody", english);
+        Assert.Contains("close and restart", confirmation, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Runner", confirmation);
+        Assert.Contains("not be force-terminated", confirmation);
+        Assert.Contains("将关闭并重新启动", UiText.Get("Update.InstallConfirmBody", Chinese));
+        Assert.Contains("不会强制终止 Codex 请求", UiText.Get("Update.InstallConfirmBody", Chinese));
+        Assert.Contains("already in progress", UiText.Get("Update.InProgress", english));
+        Assert.Contains("更新已在进行中", UiText.Get("Update.InProgress", Chinese));
+    }
+
+    [Fact]
+    public void TrayUpdateNotification_IsOncePerAvailableVersionAndNeverForReadyState()
+    {
+        var tracker = new TrayUpdateNotificationTracker();
+        var available = UpdateReadModel.UpdateAvailable("0.2.0", "0.3.1");
+
+        Assert.True(tracker.ShouldNotify(available));
+        Assert.False(tracker.ShouldNotify(available));
+        Assert.False(tracker.ShouldNotify(available with { Status = UpdateViewStatus.ReadyToInstall }));
+        Assert.True(tracker.ShouldNotify(available with { TargetVersion = "0.3.2" }));
     }
 }

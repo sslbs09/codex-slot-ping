@@ -4,12 +4,25 @@ using CodexSlotPing.App.ReadModels;
 
 namespace CodexSlotPing.App;
 
+public sealed class TrayUpdateNotificationTracker
+{
+    private readonly HashSet<string> _notifiedVersions = new(StringComparer.Ordinal);
+
+    public bool ShouldNotify(UpdateReadModel state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        return state.Status == UpdateViewStatus.UpdateAvailable &&
+            !string.IsNullOrWhiteSpace(state.TargetVersion) && _notifiedVersions.Add(state.TargetVersion);
+    }
+}
+
 public sealed class TrayIconController : IDisposable
 {
     public static IReadOnlyList<string> MenuEntryNames =>
         [UiText.Get("Tray.Open"), UiText.Get("Tray.TestNow"), UiText.Get("Tray.StatusLabel"),
             UiText.Get("Tray.AutomationControlLabel"), UiText.Get("Tray.SchedulerLabel"), UiText.Get("Tray.WakeComputer"),
-            UiText.Get("Automation.Pause"), UiText.Get("Tray.Settings"), UiText.Get("Tray.OpenLogs"), UiText.Get("Tray.Exit")];
+            UiText.Get("Automation.Pause"), UiText.Get("Tray.UpdateAvailable"), UiText.Get("Tray.Settings"),
+            UiText.Get("Tray.OpenLogs"), UiText.Get("Tray.Exit")];
 
     private readonly MainWindow _window;
     private readonly AppController _controller;
@@ -20,6 +33,8 @@ public sealed class TrayIconController : IDisposable
     private readonly Forms.ToolStripMenuItem _schedulerItem;
     private readonly Forms.ToolStripMenuItem _wakeItem;
     private readonly Forms.ToolStripMenuItem _pauseResumeItem;
+    private readonly Forms.ToolStripMenuItem _updateItem;
+    private readonly TrayUpdateNotificationTracker _updateNotifications = new();
     private bool _updatingWakeState;
     private bool _disposed;
 
@@ -37,14 +52,16 @@ public sealed class TrayIconController : IDisposable
         _schedulerItem = new Forms.ToolStripMenuItem(UiText.Format("Tray.SchedulerState", UiText.Get("State.Unknown"))) { Enabled = false };
         _wakeItem = new Forms.ToolStripMenuItem(labels[5]) { CheckOnClick = true };
         _pauseResumeItem = new Forms.ToolStripMenuItem(labels[6]);
-        var settingsItem = new Forms.ToolStripMenuItem(labels[7]);
-        var logsItem = new Forms.ToolStripMenuItem(labels[8]);
-        var exitItem = new Forms.ToolStripMenuItem(labels[9]);
+        _updateItem = new Forms.ToolStripMenuItem(labels[7]) { Visible = false };
+        var settingsItem = new Forms.ToolStripMenuItem(labels[8]);
+        var logsItem = new Forms.ToolStripMenuItem(labels[9]);
+        var exitItem = new Forms.ToolStripMenuItem(labels[10]);
 
         openItem.Click += (_, _) => _window.ShowFromTray();
         _testNowItem.Click += async (_, _) => await _window.RunTestNowFromTrayAsync();
         _wakeItem.CheckedChanged += async (_, _) => await WakeChangedAsync();
         _pauseResumeItem.Click += async (_, _) => await _window.ToggleAutomationFromTrayAsync();
+        _updateItem.Click += (_, _) => _window.OpenUpdatePanelFromTray();
         settingsItem.Click += (_, _) => _window.OpenSettingsFromTray();
         logsItem.Click += (_, _) => _window.OpenLogsFromTray();
         exitItem.Click += async (_, _) => await _window.RequestExitAsync();
@@ -56,6 +73,7 @@ public sealed class TrayIconController : IDisposable
             _schedulerItem,
             _wakeItem,
             _pauseResumeItem,
+            _updateItem,
             new Forms.ToolStripSeparator(),
             settingsItem,
             logsItem,
@@ -88,6 +106,20 @@ public sealed class TrayIconController : IDisposable
     }
 
     public void SetTestNowRunning(bool running) => _testNowItem.Enabled = !running;
+
+    public void UpdateUpdateState(UpdateReadModel state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        var available = state.Status is UpdateViewStatus.UpdateAvailable or UpdateViewStatus.ReadyToInstall;
+        _updateItem.Visible = available;
+        if (!_updateNotifications.ShouldNotify(state))
+        {
+            return;
+        }
+
+        _icon.ShowBalloonTip(5000, UiText.Get("Tray.UpdateNotificationTitle"),
+            UiText.Format("Tray.UpdateNotificationBody", state.TargetVersion), Forms.ToolTipIcon.Info);
+    }
 
     public void Dispose()
     {

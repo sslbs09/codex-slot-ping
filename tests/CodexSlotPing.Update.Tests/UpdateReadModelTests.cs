@@ -66,7 +66,10 @@ public sealed class UpdateReadModelTests
         Assert.Equal(UpdateViewStatus.Downloading, model.Status);
         Assert.Equal(42, model.DownloadProgressPercent);
         Assert.Null(model.OperationId);
-        Assert.DoesNotContain("Installing", Enum.GetNames<UpdateViewStatus>());
+        Assert.NotEqual(UpdateViewStatus.Installing, model.Status);
+        var installing = UpdateReadModel.Installing(UpdateReadModel.ReadyToInstall("0.2.0", "0.3.0", "operation-1"));
+        Assert.Equal(UpdateViewStatus.Installing, installing.Status);
+        Assert.Equal("operation-1", installing.OperationId);
     }
 
     [Fact]

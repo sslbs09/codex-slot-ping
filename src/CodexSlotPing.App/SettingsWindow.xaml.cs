@@ -11,17 +11,20 @@ public partial class SettingsWindow : Window
     private readonly AppController _controller;
     private readonly AppUpdateController _updateController;
     private readonly Action<AppScreenState>? _stateChanged;
+    private readonly Func<Task>? _installAndRestart;
 
     public SettingsWindow(
         AppController controller,
         AppScreenState screenState,
         AppUpdateController updateController,
-        Action<AppScreenState>? stateChanged = null)
+        Action<AppScreenState>? stateChanged = null,
+        Func<Task>? installAndRestart = null)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _screenState = screenState ?? throw new ArgumentNullException(nameof(screenState));
         _updateController = updateController ?? throw new ArgumentNullException(nameof(updateController));
         _stateChanged = stateChanged;
+        _installAndRestart = installAndRestart;
         InitializeComponent();
         InitializeFields();
         RenderUpdateState(_updateController.CurrentState);
@@ -294,6 +297,15 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private async void InstallUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_installAndRestart is null) return;
+        InstallUpdateButton.IsEnabled = false;
+        try { await _installAndRestart(); }
+        catch (Exception exception) { UpdateStatusText.Text = UiText.Format("Settings.Exception", exception.Message); }
+        finally { RenderUpdateState(_updateController.CurrentState); }
+    }
+
     private void UpdateController_StateChanged(UpdateReadModel state) => RenderUpdateState(state);
 
     private void RenderUpdateState(UpdateReadModel state)
@@ -303,9 +315,10 @@ public partial class SettingsWindow : Window
             UpdateViewStatus.Unknown => UiText.Get("Update.Unknown"),
             UpdateViewStatus.Checking => UiText.Get("Update.Checking"),
             UpdateViewStatus.UpToDate => UiText.Format("Update.UpToDate", state.CurrentVersion),
-            UpdateViewStatus.UpdateAvailable => UiText.Format("Update.Available", state.TargetVersion ?? string.Empty),
+            UpdateViewStatus.UpdateAvailable => UiText.Format("Update.Available", state.CurrentVersion, state.TargetVersion ?? string.Empty),
             UpdateViewStatus.Downloading => UiText.Format("Update.Downloading", state.DownloadProgressPercent is int percent ? $" ({percent}%)" : string.Empty),
             UpdateViewStatus.ReadyToInstall => UiText.Format("Update.ReadyToInstall", state.StagedVersion ?? state.TargetVersion ?? string.Empty),
+            UpdateViewStatus.Installing => UiText.Get("Update.Installing"),
             UpdateViewStatus.Failed => UiText.Format("Update.Failed", UiText.Get(state.ErrorCategory switch
             {
                 UpdateFailureCategory.Network => "Update.Error.Network",
@@ -320,6 +333,7 @@ public partial class SettingsWindow : Window
                 UpdateFailureCategory.PackageInvalid => "Update.Error.PackageInvalid",
                 UpdateFailureCategory.VersionMismatch => "Update.Error.VersionMismatch",
                 UpdateFailureCategory.StagingIoFailure => "Update.Error.StagingIoFailure",
+                UpdateFailureCategory.UpdaterBootstrapFailure => "Update.Error.Bootstrap",
                 _ => "Update.Error.Api"
             })),
             _ => UiText.Get("Update.Unknown")
@@ -336,7 +350,14 @@ public partial class SettingsWindow : Window
         UpdateAssetText.Visibility = string.IsNullOrWhiteSpace(UpdateAssetText.Text) ? Visibility.Collapsed : Visibility.Visible;
         DownloadUpdateButton.Visibility = state.Status == UpdateViewStatus.UpdateAvailable ? Visibility.Visible : Visibility.Collapsed;
         DownloadUpdateButton.IsEnabled = state.Status == UpdateViewStatus.UpdateAvailable;
-        CheckForUpdatesButton.IsEnabled = state.Status is not UpdateViewStatus.Checking and not UpdateViewStatus.Downloading;
+        var stagedForRetry = state.Status == UpdateViewStatus.Failed && _updateController.ReadyToInstallPackage is not null;
+        InstallUpdateButton.Visibility = state.Status == UpdateViewStatus.ReadyToInstall || stagedForRetry
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        InstallUpdateButton.Content = stagedForRetry ? UiText.Get("Update.RetryInstall") : UiText.Get("Update.InstallAndRestart");
+        InstallUpdateButton.IsEnabled = _installAndRestart is not null &&
+            state.Status is UpdateViewStatus.ReadyToInstall or UpdateViewStatus.Failed;
+        CheckForUpdatesButton.IsEnabled = state.Status is not UpdateViewStatus.Checking and not UpdateViewStatus.Downloading and not UpdateViewStatus.Installing;
     }
 
     private void RenderAutomationControl()

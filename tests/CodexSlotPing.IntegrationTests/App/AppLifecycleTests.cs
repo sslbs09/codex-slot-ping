@@ -20,6 +20,8 @@ public sealed class AppLifecycleTests
     {
         Assert.True(AppExitPolicy.ShouldHideToTray(exitRequested: false));
         Assert.False(AppExitPolicy.ShouldHideToTray(exitRequested: true));
+        Assert.False(AppExitPolicy.ShouldHideToTray(AppShutdownReason.UpdateHandoff));
+        Assert.True(AppExitPolicy.ShouldHideToTray(AppShutdownReason.Normal));
     }
 
     [Fact]

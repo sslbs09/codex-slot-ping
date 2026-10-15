@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using CodexSlotPing.App.ReadModels;
+using CodexSlotPing.Update;
 using WpfButton = System.Windows.Controls.Button;
 using WpfClipboard = System.Windows.Clipboard;
 using WpfColorConverter = System.Windows.Media.ColorConverter;
@@ -19,8 +20,10 @@ public partial class MainWindow : Window
     private UiPreferencesStore? _preferencesStore;
     private TrayIconController? _tray;
     private AppScreenState? _screenState;
-    private bool _exitRequested;
     private bool _testNowRunning;
+    private AppShutdownReason _shutdownReason = AppShutdownReason.Normal;
+    private readonly Action? _onUsableStartup;
+    private readonly bool _suppressBackgroundUpdateCheck;
 
     public MainWindow() : this(AppController.CreateDefault(), new UiPreferencesStore(), AppUpdateController.CreateDefault())
     {
@@ -35,13 +38,22 @@ public partial class MainWindow : Window
     {
     }
 
-    public MainWindow(AppController controller, UiPreferencesStore preferencesStore, AppUpdateController updateController)
+    public MainWindow(
+        AppController controller,
+        UiPreferencesStore preferencesStore,
+        AppUpdateController updateController,
+        Action? onUsableStartup = null,
+        bool suppressBackgroundUpdateCheck = false)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _preferencesStore = preferencesStore ?? throw new ArgumentNullException(nameof(preferencesStore));
         _updateController = updateController ?? throw new ArgumentNullException(nameof(updateController));
+        _onUsableStartup = onUsableStartup;
+        _suppressBackgroundUpdateCheck = suppressBackgroundUpdateCheck;
         InitializeComponent();
         Closing += Window_Closing;
+        _updateController.StateChanged += UpdateController_StateChanged;
+        Closed += (_, _) => _updateController.StateChanged -= UpdateController_StateChanged;
     }
 
     public void AttachTray(TrayIconController tray)
@@ -51,9 +63,15 @@ public partial class MainWindow : Window
         {
             _tray.UpdateState(_screenState);
         }
+        _tray.UpdateUpdateState(_updateController.CurrentState);
     }
 
-    private async void Window_Loaded(object sender, RoutedEventArgs e) => await RefreshAsync();
+    private async void Window_Loaded(object sender, RoutedEventArgs e)
+    {
+        await RefreshAsync();
+        _onUsableStartup?.Invoke();
+        if (!_suppressBackgroundUpdateCheck) _ = CheckForUpdatesAfterStartupAsync();
+    }
 
     private async Task RefreshAsync()
     {
@@ -312,7 +330,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        var window = new SettingsWindow(_controller, _screenState, _updateController, OnSettingsStateChanged) { Owner = this };
+        var window = new SettingsWindow(_controller, _screenState, _updateController, OnSettingsStateChanged,
+            InstallAndRestartAsync) { Owner = this };
         if (window.ShowDialog() == true)
         {
             await RefreshAsync();
@@ -330,6 +349,95 @@ public partial class MainWindow : Window
     {
         ShowFromTray();
         await OpenSettingsAsync();
+    }
+
+    internal void OpenUpdatePanelFromTray()
+    {
+        ShowFromTray();
+        _ = OpenSettingsAsync();
+    }
+
+    internal async Task InstallAndRestartAsync()
+    {
+        if (_testNowRunning || _controller.IsTestNowRunning)
+        {
+            WpfMessageBox.Show(UiText.Get("Update.TestNowRunning"), "Codex Slot Ping",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var answer = WpfMessageBox.Show(
+            UiText.Get("Update.InstallConfirmBody"),
+            UiText.Get("Update.InstallConfirmTitle"),
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) return;
+
+        var result = await _updateController.InstallAndRestartAsync(
+            AppContext.BaseDirectory,
+            GetCurrentProcessIdentity(),
+            () => _testNowRunning || _controller.IsTestNowRunning,
+            CancellationToken.None);
+        if (result.Status == UpdateHandoffStatus.Ready)
+        {
+            ShutdownForUpdate();
+        }
+        else if (result.Status == UpdateHandoffStatus.TestNowRunning)
+        {
+            WpfMessageBox.Show(UiText.Get("Update.TestNowRunning"), "Codex Slot Ping",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        else if (result.Status != UpdateHandoffStatus.AlreadyInstalling)
+        {
+            WpfMessageBox.Show(UiText.Get("Update.BootstrapFailed"), "Codex Slot Ping",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    internal void ShowUpdateNotice(string message)
+    {
+        UpdateNoticeText.Text = message;
+        UpdateNoticeText.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private async Task CheckForUpdatesAfterStartupAsync()
+    {
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        try
+        {
+            await _updateController.CheckForUpdatesAsync(manualRefresh: false, CancellationToken.None);
+        }
+        catch (Exception)
+        {
+            // Update failures remain isolated to the update view.
+        }
+    }
+
+    private void UpdateController_StateChanged(UpdateReadModel state)
+    {
+        UpdateBannerButton.Visibility = state.Status is UpdateViewStatus.UpdateAvailable or UpdateViewStatus.ReadyToInstall
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        UpdateBannerButton.Content = state.Status == UpdateViewStatus.ReadyToInstall
+            ? UiText.Format("Update.ReadyBanner", state.TargetVersion ?? string.Empty)
+            : UiText.Format("Update.AvailableBanner", state.TargetVersion ?? string.Empty);
+        _tray?.UpdateUpdateState(state);
+    }
+
+    private async void UpdateBanner_Click(object sender, RoutedEventArgs e) => await OpenSettingsAsync();
+
+    private void ShutdownForUpdate()
+    {
+        _shutdownReason = AppShutdownReason.UpdateHandoff;
+        _tray?.Dispose();
+        System.Windows.Application.Current.Shutdown();
+    }
+
+    private static ProcessIdentity GetCurrentProcessIdentity()
+    {
+        using var process = Process.GetCurrentProcess();
+        return new ProcessIdentity(process.Id, new DateTimeOffset(process.StartTime.ToUniversalTime()));
     }
 
     private void OpenLogs_Click(object sender, RoutedEventArgs e)
@@ -431,7 +539,7 @@ public partial class MainWindow : Window
 
         if (!AppExitPolicy.TryRequestExit(_testNowRunning, () =>
             {
-                _exitRequested = true;
+                _shutdownReason = AppShutdownReason.UserExit;
                 _tray?.Dispose();
                 System.Windows.Application.Current.Shutdown();
             }))
@@ -443,7 +551,7 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
-        if (AppExitPolicy.ShouldHideToTray(_exitRequested))
+        if (AppExitPolicy.ShouldHideToTray(_shutdownReason))
         {
             e.Cancel = true;
             Hide();

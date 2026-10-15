@@ -11,6 +11,7 @@ public enum UpdateViewStatus
     UpdateAvailable,
     Downloading,
     ReadyToInstall,
+    Installing,
     Failed
 }
 
@@ -28,7 +29,8 @@ public enum UpdateFailureCategory
     ChecksumInvalid,
     PackageInvalid,
     VersionMismatch,
-    StagingIoFailure
+    StagingIoFailure,
+    UpdaterBootstrapFailure
 }
 
 public sealed record UpdateAssetView(string FileName, string DownloadUrl, long Size);
@@ -54,6 +56,9 @@ public sealed record UpdateReadModel(
     public static UpdateReadModel Checking(string currentVersion) =>
         new(UpdateViewStatus.Checking, currentVersion, null, null, null, null, null, null, null, null);
 
+    public static UpdateReadModel UpdateAvailable(string currentVersion, string targetVersion) =>
+        new(UpdateViewStatus.UpdateAvailable, currentVersion, targetVersion, null, null, null, null, null, null, null);
+
     public static UpdateReadModel Downloading(string currentVersion, string targetVersion, int? percentComplete = null) =>
         new(UpdateViewStatus.Downloading, currentVersion, targetVersion, null, null, null, null, null, null, null,
             Math.Clamp(percentComplete ?? 0, 0, 100));
@@ -61,6 +66,9 @@ public sealed record UpdateReadModel(
     public static UpdateReadModel ReadyToInstall(string currentVersion, string targetVersion, string operationId) =>
         new(UpdateViewStatus.ReadyToInstall, currentVersion, targetVersion, null, null, null, null, null, null, null,
             null, targetVersion, operationId);
+
+    public static UpdateReadModel Installing(UpdateReadModel ready) =>
+        ready with { Status = UpdateViewStatus.Installing, DownloadProgressPercent = null, ErrorCategory = null };
 
     public static UpdateReadModel Failed(string currentVersion, string? targetVersion, UpdateFailureCategory category) =>
         new(UpdateViewStatus.Failed, currentVersion, targetVersion, null, null, null, null, null, category, null);

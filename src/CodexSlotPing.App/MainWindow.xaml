@@ -70,6 +70,10 @@
             </StackPanel>
             <TextBlock x:Name="LoginStatusText" Text="" Foreground="#606962" Margin="22,0,0,2" />
             <TextBlock x:Name="VersionText" Text="" Foreground="#818780" Margin="22,0,0,0" />
+            <Button x:Name="UpdateBannerButton" Style="{StaticResource QuietButton}" HorizontalAlignment="Left"
+                    Visibility="Collapsed" Margin="22,5,0,0" Click="UpdateBanner_Click" />
+            <TextBlock x:Name="UpdateNoticeText" Text="" Foreground="#3C7657" TextWrapping="Wrap"
+                       Margin="22,5,0,0" Visibility="Collapsed" />
 
             <Border Height="1" Background="#D8DAD4" Margin="0,18,0,16" />
 
